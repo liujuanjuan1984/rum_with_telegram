@@ -24,7 +24,6 @@ class Config:
     TG_BOT_NAME = "@MyBotName"
     TG_GROUP_NAME = "@my_group"
     TG_GROUP_ID = -10012345678
-    DATA_FILE = "data_exchanger_test.json"
     DB_URL = f"sqlite3:///{basedir}/test_db.sqlite"
     DB_ECHO = False
 
