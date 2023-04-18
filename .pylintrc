@@ -1,0 +1,13 @@
+[MASTER]
+disable=
+    C0114, # missing-module-docstring
+    C0115, # missing-class-docstring
+    C0116, # missing-function-docstring
+    C0301, # Line too long (115/100) (line-too-long)
+    C0103, # Variable name "x" doesn't conform to snake_case naming style (invalid-name)
+    W0511, # TODO: (fixme)
+    W0613, # Unused argument 'context' (unused-argument)
+    W0703, # Catching too general exception Exception (broad-except)
+    R0904, # Too many public methods (47/20) (too-many-public-methods)
+    R0903, # Too few public methods (1/2) (too-few-public-methods)
+    R0913, # Too many arguments (7/5) (too-many-arguments)

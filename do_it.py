@@ -1,10 +1,17 @@
 import logging
+import os
 
 from src import DataExchanger
 
 logging.basicConfig(
     level=logging.INFO, format="%(name)s - %(asctime)s - %(levelname)s - %(message)s"
 )
+
+logger = logging.getLogger(__name__)
+
+
+basedir = os.path.dirname(__file__)
+logger.info("basedir: %s", basedir)
 
 
 class Config:
@@ -18,6 +25,8 @@ class Config:
     TG_GROUP_NAME = "@my_group"
     TG_GROUP_ID = -10012345678
     DATA_FILE = "data_exchanger_test.json"
+    DB_URL = f"sqlite3:///{basedir}/test_db.sqlite"
+    DB_ECHO = False
 
 
 if __name__ == "__main__":

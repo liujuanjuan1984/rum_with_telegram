@@ -1,3 +1,5 @@
 python-telegram-bot==13.12
 quorum-data-py
 quorum-mininode-py 
+sqlalchemy 
+eth-account==0.5.8
