@@ -2,7 +2,7 @@ import logging
 
 from src.data_exchanger import DataExchanger
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 __author__ = "liujuanjuan1984"
 
 logger = logging.getLogger(__name__)

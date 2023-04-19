@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 basedir = os.path.dirname(__file__)
-logger.info("basedir: %s", basedir)
+logger.debug("basedir: %s", basedir)
 
 
 class Config:
@@ -20,10 +20,12 @@ class Config:
     FEED_URL_BASE = "https://example/posts/"
     TG_USER_ID = 123456789
     TG_CHANNEL_NAME = "@my_channel"
+    TG_CHANNEL_URL = "https://t.me/my_channel"
+    TG_CHANNEL_ID = -100123456678
     TG_BOT_TOKEN = "1234566767:mybotkey"  # bot token
     TG_BOT_NAME = "@MyBotName"
     TG_GROUP_NAME = "@my_group"
-    TG_GROUP_ID = -10012345678
+    TG_GROUP_ID = -1001234567876
     DB_URL = f"sqlite3:///{basedir}/test_db.sqlite"
     DB_ECHO = False
 

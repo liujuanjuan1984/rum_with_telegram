@@ -47,9 +47,7 @@ class DataExchanger:
         else:
             pvtkey = None
 
-        logger.info("account before %s", self.rum.account.pvtkey)
         self.rum.change_account(pvtkey)
-        logger.info("account after %s", self.rum.account.pvtkey)
         if reply_id:
             data = feed.reply(content=text, reply_id=reply_id)
         else:
@@ -66,7 +64,53 @@ class DataExchanger:
             origin_id = self._get_origin_post_id(reply_id)
         rum_post_url = f"{self.config.FEED_URL_BASE}{origin_id or rum_post_id }"
         logger.info("success: send_to_rum %s", trx_id)
-        return trx_id, rum_post_id, rum_post_url
+
+        relation = {
+            "group_id": self.rum.group.group_id,
+            "trx_id": trx_id,
+            "rum_post_id": rum_post_id,
+            "rum_post_url": rum_post_url,
+            "user_id": userid,
+            "pubkey": self.rum.account.pubkey,
+            "trx_type": "post" if not reply_id else "comment",
+        }
+        return relation
+
+    def _comment_with_feedurl(
+        self, extend_text: str, userid, reply_to_message_id, rum_post_url
+    ):
+        """reply to user with rum post url"""
+        reply = "⚜️ 数据已上链 Success to rum group blockchain" + (extend_text or "")
+        reply_markup = {
+            "inline_keyboard": [
+                [{"text": "Click here to view 点击查看", "url": rum_post_url}]
+            ]
+        }
+        resp = self.tg.send_message(
+            chat_id=userid,
+            text=reply,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+            reply_to_message_id=reply_to_message_id,
+        )
+        logger.debug("send reply done\n\n%s", resp)
+
+    def _db_user(self, userid, username):
+        payload = {
+            "user_id": userid,
+            "username": username,
+            "pvtkey": self.rum.account.pvtkey,
+            "pubkey": self.rum.account.pubkey,
+            "address": self.rum.account.address,
+        }
+        self.db.add_or_update(User, payload, "user_id")
+
+    def _origin(self, channel_message_id):
+        return {
+            "type": "telegram",
+            "name": self.config.TG_CHANNEL_NAME,
+            "url": f"{self.config.TG_CHANNEL_URL}/{channel_message_id}",
+        }
 
     def handle_private_chat(self, update, context):
         """send message to rum group and telegram channel"""
@@ -77,244 +121,181 @@ class DataExchanger:
         _text = update.message.text
         text = f"{_text}\nFrom telegram user @{username} through bot {self.config.TG_BOT_NAME}"
         resp = self.tg.send_message(chat_id=self.config.TG_CHANNEL_NAME, text=text)
-        trx_id, rum_post_id, rum_post_url = self.send_to_rum(
+        relation = self.send_to_rum(
             _text,
             userid,
-            origin={
-                "type": "telegram",
-                "name": self.config.TG_CHANNEL_NAME,
-                "url": f"{self.config.TG_CHANNEL_URL}/{resp.message_id}",
-            },
+            origin=self._origin(resp.message_id),
         )
         logger.debug("send_to_channel done\n\n%s\n\n", resp)
 
-        payload = {
-            "group_id": self.rum.group.group_id,
-            "trx_id": trx_id,
-            "trx_type": "post",
-            "rum_post_id": rum_post_id,
-            "chat_type": "private",
-            "chat_message_id": message_id,
-            "channel_message_id": resp.message_id,
-            "rum_post_url": rum_post_url,
-            "user_id": userid,
-            "pubkey": self.rum.account.pubkey,
-        }
-        self.db.add_or_update(Relation, payload, "trx_id")
-
-        payload = {
-            "user_id": userid,
-            "username": username,
-            "pvtkey": self.rum.account.pvtkey,
-            "pubkey": self.rum.account.pubkey,
-            "address": self.rum.account.address,
-        }
-        self.db.add_or_update(User, payload, "user_id")
-
-        # reply to user
-        reply = f"Success to telegram channel {self.config.TG_CHANNEL_NAME} and rum group blockchain"
-        reply_markup = {
-            "inline_keyboard": [[{"text": "Click here to view", "url": rum_post_url}]]
-        }
-        resp = self.tg.send_message(
-            chat_id=userid,
-            text=reply,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-            reply_to_message_id=message_id,
+        relation.update(
+            {
+                "chat_type": "private",
+                "chat_message_id": message_id,
+                "channel_message_id": resp.message_id,
+            }
         )
-        logger.debug("send reply done\n\n%s", resp)
+        self.db.add_or_update(Relation, relation, "trx_id")
+        self._db_user(userid, username)
+        self._comment_with_feedurl(
+            f" and to channel {self.config.TG_CHANNEL_NAME}",
+            userid,
+            message_id,
+            relation.get("rum_post_url"),
+        )
+
+    def _handle_channel_post(self, update, context):
+        """send message to rum group"""
+        logger.debug("handle_channel_post\n\n%s\n\n", update)
+        # channel post to rum group chain
+        userid = update.channel_post.chat.id
+        username = update.channel_post.chat.username
+        # send to rum
+        relation = self.send_to_rum(
+            update.channel_post.text,
+            userid,
+            origin=self._origin(update.channel_post.message_id),
+        )
+        relation.update(
+            {
+                "channel_message_id": update.channel_post.message_id,
+            }
+        )
+        self.db.add_or_update(Relation, relation, "trx_id")
+        self._db_user(userid, username)
 
     def handle_channel_message(self, update, context):
         """send message to rum group"""
         logger.debug("handle_channel_message\n\n%s\n\n", update)
         # channel post to rum group chain
         if update.channel_post:
-            logger.info("channel_post")
-            userid = update.channel_post.chat.id
-            username = update.channel_post.chat.username
-            if username != self.config.TG_CHANNEL_NAME.lstrip("@"):
-                logger.warning(
-                    "%s message not from channel %s",
-                    username,
-                    self.config.TG_CHANNEL_NAME,
-                )
+            self._handle_channel_post(update, context)
+            return
+        channel_message_id = update.message.forward_from_message_id
+        chat_message_id = update.message.message_id
 
-            # send to rum
-            trx_id, rum_post_id, rum_post_url = self.send_to_rum(
-                update.channel_post.text,
-                userid,
-                origin={
-                    "type": "telegram",
-                    "name": self.config.TG_CHANNEL_NAME,
-                    "url": f"{self.config.TG_CHANNEL_URL}/{update.channel_post.message_id}",
-                },
-            )
+        # send reply to user in group chat
+        rum_post_url = self.db.get_trx_sent(channel_message_id).rum_post_url
+        if not rum_post_url:
+            logger.warning("not found channel_message_id %s", channel_message_id)
+            return
+        self._comment_with_feedurl(
+            "", update.message.chat.id, chat_message_id, rum_post_url
+        )
+        payload = {
+            "chat_message_id": chat_message_id,
+            "chat_type": update.message.chat.type,
+            "channel_message_id": channel_message_id,
+        }
+        self.db.add_or_update(Relation, payload, "chat_message_id")
 
-            # update db
-            payload = {
-                "group_id": self.rum.group.group_id,
-                "trx_id": trx_id,
-                "trx_type": "post",
-                "rum_post_id": rum_post_id,
-                "channel_message_id": update.channel_post.message_id,
-                "rum_post_url": rum_post_url,
-                "user_id": userid,
-                "pubkey": self.rum.account.pubkey,
-            }
-            self.db.add_or_update(Relation, payload, "trx_id")
-
-            payload = {
-                "user_id": userid,
-                "username": username,
-                "pvtkey": self.rum.account.pvtkey,
-                "pubkey": self.rum.account.pubkey,
-                "address": self.rum.account.address,
-            }
-            self.db.add_or_update(User, payload, "user_id")
-
-        elif update.message:
-            logger.info("message")
-            message_id = update.message.forward_from_message_id
-
-            # send reply to user in group chat
-            obj = self.db.get_first(
-                Relation,
-                {"channel_message_id": message_id},
-                "channel_message_id",
-            )
-            if obj:
-                # leave a comment with post_url to channel post
-                rum_post_url = obj.rum_post_url
-                reply_markup = {
-                    "inline_keyboard": [
-                        [{"text": "Click here to view", "url": rum_post_url}]
-                    ]
-                }
-                resp = self.tg.send_message(
-                    chat_id=update.message.chat.id,
-                    text="Success to rum group blockchain",
-                    parse_mode="HTML",
-                    reply_markup=reply_markup,
-                    reply_to_message_id=update.message.message_id,
-                )
-                logger.debug("send reply done\n\n%s\n\n", resp)
-
-                payload = {
-                    "chat_message_id": update.message.message_id,
-                    "chat_type": update.message.chat.type,
-                    "channel_message_id": message_id,
-                }
-                self.db.add_or_update(Relation, payload, "channel_message_id")
-            else:
-                logger.warning("!!!! Todo: unknown message \n\n%s\n", update)
-        else:
-            logger.warning("!!!! Todo: unknown update \n\n%s\n", update)
-
-    def handle_group_message(self, update, context):
-        logger.debug("handle_group_message \n\n%s\n\n", update)
-
+    def _handle_reply_message(self, update, context):
+        logger.debug("handle_reply_message \n\n%s\n\n", update)
         username = update.message.from_user.username
         userid = update.message.from_user.id
-        # send to rum group
-        channel_message_id = None
+        reply_msg = update.message.reply_to_message
+        channel_message_id = reply_msg.forward_from_message_id
+        logger.debug("channel_message_id %s", channel_message_id)
+        reply_chat_message_id = reply_msg.message_id
         reply_id = None
-        if update.message.reply_to_message:
+        logger.debug("reply_chat_message_id %s", reply_chat_message_id)
+        if channel_message_id:
+            reply_id = self.db.get_trx_sent(channel_message_id).rum_post_id
+            logger.debug("channel_message_id to reply_id %s", reply_id)
+        elif reply_chat_message_id:
             obj = self.db.get_first(
                 Relation,
-                {"chat_message_id": update.message.reply_to_message.message_id},
+                {"chat_message_id": reply_chat_message_id},
                 "chat_message_id",
             )
-            if obj is None:
-                obj = self.db.get_first(
-                    Relation,
-                    {
-                        "channel_message_id": update.message.reply_to_message.forward_from_message_id
-                    },
-                    "channel_message_id",
-                )
-                channel_message_id = (
-                    update.message.reply_to_message.forward_from_message_id
-                )
-            if obj:
-                reply_id = obj.rum_post_id
+            reply_id = obj.rum_post_id
+            logger.debug("chat_message_id to reply_id %s", reply_id)
+            if obj and not channel_message_id:
                 channel_message_id = obj.channel_message_id
-        else:
+                logger.debug("get channel_message_id from db %s", channel_message_id)
+
+        if not channel_message_id and not reply_chat_message_id:
+            # get pinned
             _pinned = self.tg.get_chat(self.config.TG_GROUP_ID).pinned_message
             logger.debug("pinned message\n\n%s\n\n", _pinned)
             channel_message_id = _pinned.forward_from_message_id
-            reply_id = self.db.get_first(
-                Relation,
-                {"channel_message_id": channel_message_id},
-                "channel_message_id",
-            ).rum_post_id
+            logger.debug("get channel_message_id from pinned %s", channel_message_id)
+            reply_id = self.db.get_trx_sent(channel_message_id).rum_post_id
+            logger.debug("channel_message_id to reply_id %s", reply_id)
 
-        trx_id, rum_post_id, rum_post_url = self.send_to_rum(
+        relation = self.send_to_rum(
             update.message.text,
             userid,
             reply_id,
-            {
-                "type": "telegram",
-                "name": self.config.TG_CHANNEL_NAME,
-                "url": f"{self.config.TG_CHANNEL_URL}/{channel_message_id}",
-            },
+            self._origin(channel_message_id),
         )
-        # update db
-        payload = {
-            "group_id": self.rum.group.group_id,
-            "trx_id": trx_id,
-            "trx_type": "post" if not reply_id else "comment",
-            "rum_post_id": rum_post_id,
-            "rum_post_url": rum_post_url,
-            "chat_message_id": update.message.message_id,
-            "chat_type": update.message.chat.type,
-            "user_id": userid,
-            "pubkey": self.rum.account.pubkey,
-        }
-        self.db.add_or_update(Relation, payload, "trx_id")
 
-        payload = {
-            "user_id": userid,
-            "username": username,
-            "pvtkey": self.rum.account.pvtkey,
-            "pubkey": self.rum.account.pubkey,
-            "address": self.rum.account.address,
-        }
-        self.db.add_or_update(User, payload, "user_id")
-        # send reply
-        if reply_id is None:
-            reply_markup = {
-                "inline_keyboard": [
-                    [{"text": "Click here to view", "url": rum_post_url}]
-                ]
+        relation.update(
+            {
+                "chat_message_id": update.message.message_id,
+                "chat_type": update.message.chat.type,
+                "channel_message_id": channel_message_id,
             }
-            resp = self.tg.send_message(
-                chat_id=update.message.chat.id,
-                text="Success to rum group blockchain",
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-                reply_to_message_id=update.message.message_id,
-            )
-            logger.debug("send reply done\n\n%s\n", resp)
+        )
+        self.db.add_or_update(Relation, relation, "trx_id")
+        self._db_user(userid, username)
+
+    def handle_group_message(self, update, context):
+        """handle group message"""
+
+        if update.message.reply_to_message:
+            self._handle_reply_message(update, context)
+            return
+        logger.debug("handle_group_message without reply_to_messagen")
+
+        username = update.message.from_user.username
+        userid = update.message.from_user.id
+
+        _pinned = self.tg.get_chat(self.config.TG_GROUP_ID).pinned_message
+        logger.debug("pinned message\n\n%s\n\n", _pinned)
+        channel_message_id = _pinned.forward_from_message_id
+        logger.debug("get channel_message_id from pinned %s", channel_message_id)
+        reply_id = self.db.get_trx_sent(channel_message_id).rum_post_id
+        logger.debug("channel_message_id to reply_id %s", reply_id)
+
+        relation = self.send_to_rum(
+            update.message.text,
+            userid,
+            reply_id,
+            self._origin(channel_message_id),
+        )
+        relation.update(
+            {
+                "chat_message_id": update.message.message_id,
+                "chat_type": update.message.chat.type,
+                "channel_message_id": channel_message_id,
+            }
+        )
+        self.db.add_or_update(Relation, relation, "trx_id")
+        self._db_user(userid, username)
 
     def run(self):
+        # private chat message: send to tg channel and rum group as new post
+        # and reply the url to user in private chat and the comment of the channel post
         self.dispatcher.add_handler(
             MessageHandler(
                 Filters.text & ~Filters.command & Filters.chat_type.private,
                 self.handle_private_chat,
             )
         )
-
+        # channel message: send to rum group as new post; and reply to user in group chat
         self.dispatcher.add_handler(
             MessageHandler(
-                Filters.text & ~Filters.command & Filters.sender_chat.channel,
+                Filters.text
+                & ~Filters.command
+                & Filters.sender_chat(self.config.TG_CHANNEL_ID),
                 self.handle_channel_message,
             )
         )
 
         self.dispatcher.add_handler(
             MessageHandler(
-                Filters.text & ~Filters.command & Filters.sender_chat.super_group,
+                Filters.text & ~Filters.command & Filters.chat_type.groups,
                 self.handle_group_message,
             )
         )

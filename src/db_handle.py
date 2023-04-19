@@ -3,7 +3,7 @@ import logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.module import Base
+from src.module import Base, Relation
 
 logger = logging.getLogger(__name__)
 
@@ -16,26 +16,39 @@ class DBHandle:
         Base.metadata.create_all(self.engine)
 
     def get_first(self, table, payload: dict, pk: str):
-        logger.info("start get_first:  %s %s", pk, payload[pk])
+        logger.debug("start get_first:  %s\n%s", pk, payload)
         with self.Session() as session:
             return session.query(table).filter_by(**{pk: payload[pk]}).first()
 
     def get_all(self, table, payload: dict, pk: str):
-        logger.info("start get_all:  %s %s", pk, payload[pk])
+        logger.debug("start get_all:  %s\n%s", pk, payload)
         with self.Session() as session:
             return session.query(table).filter_by(**{pk: payload[pk]}).all()
 
+    def get_trx_sent(self, channel_message_id):
+        logger.debug("start get_post_id:  %s", channel_message_id)
+        with self.Session() as session:
+            relatins = (
+                session.query(Relation)
+                .filter_by(channel_message_id=channel_message_id)
+                .all()
+            )
+            for i in relatins:
+                if i.trx_id:
+                    return i
+        return None
+
     def is_exist(self, table, payload: dict, pk: str):
-        logger.info("start is_exist: %s %s", pk, payload[pk])
+        logger.debug("start is_exist: %s\n%s", pk, payload)
         with self.Session() as session:
             return session.query(table).filter_by(**{pk: payload[pk]}).count() > 0
 
     def add_or_update(self, table, payload, pk):
-        logger.info("start add_or_update: %s %s", pk, payload[pk])
+        logger.debug("start add_or_update: %s\n%s", pk, payload)
         with self.Session() as session:
             obj = session.query(table).filter_by(**{pk: payload[pk]}).first()
             if obj:
-                logger.info("update to db:\n%s", payload)
+                logger.debug("update to db:\n%s", payload)
                 session.query(table).filter_by(**{pk: payload[pk]}).update(payload)
                 logger.info("update to db: %s %s", pk, payload[pk])
             else:
