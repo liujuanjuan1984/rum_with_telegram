@@ -36,7 +36,7 @@ class DataExchanger:
         logger.warning("failed!!! get origin post id for %s", rum_post_id)
         return None
 
-    def send_to_rum(self, text: str, userid, reply_id=None):
+    def send_to_rum(self, text: str, userid, reply_id=None, origin: dict = None):
         """send text as trx to rum group chain"""
         if not text:
             logger.warning("text is empty")
@@ -54,6 +54,8 @@ class DataExchanger:
             data = feed.reply(content=text, reply_id=reply_id)
         else:
             data = feed.new_post(content=text)
+        if origin:
+            data["origin"] = origin
         resp = self.rum.api.post_content(data)
         if "trx_id" not in resp:
             raise ValueError(f"send to rum failed {resp}")
@@ -72,10 +74,18 @@ class DataExchanger:
         message_id = update.message.message_id
         userid = update.message.from_user.id
         username = update.message.from_user.username
-        text = update.message.text
-        text = f"{text}\nFrom telegram user @{username} through bot {self.config.TG_BOT_NAME}"
-        trx_id, rum_post_id, rum_post_url = self.send_to_rum(text, userid)
+        _text = update.message.text
+        text = f"{_text}\nFrom telegram user @{username} through bot {self.config.TG_BOT_NAME}"
         resp = self.tg.send_message(chat_id=self.config.TG_CHANNEL_NAME, text=text)
+        trx_id, rum_post_id, rum_post_url = self.send_to_rum(
+            _text,
+            userid,
+            origin={
+                "type": "telegram",
+                "name": f"@{username}",
+                "url": f"{self.config.TG_CHANNEL_URL}/{resp.message_id}",
+            },
+        )
         logger.debug("send_to_channel done\n\n%s\n\n", resp)
 
         payload = {
@@ -131,8 +141,15 @@ class DataExchanger:
                 )
 
             # send to rum
-            text = f"{update.channel_post.text}\nFrom telegram channel @{username}"
-            trx_id, rum_post_id, rum_post_url = self.send_to_rum(text, userid)
+            trx_id, rum_post_id, rum_post_url = self.send_to_rum(
+                update.channel_post.text,
+                userid,
+                origin={
+                    "type": "telegram",
+                    "name": f"@{username}",
+                    "url": f"{self.config.TG_CHANNEL_URL}/{update.channel_post.message_id}",
+                },
+            )
 
             # update db
             payload = {
@@ -169,7 +186,6 @@ class DataExchanger:
             if obj:
                 # leave a comment with post_url to channel post
                 rum_post_url = obj.rum_post_url
-                reply = f"Success to rum group blockchain"
                 reply_markup = {
                     "inline_keyboard": [
                         [{"text": "Click here to view", "url": rum_post_url}]
@@ -177,7 +193,7 @@ class DataExchanger:
                 }
                 resp = self.tg.send_message(
                     chat_id=update.message.chat.id,
-                    text=reply,
+                    text="Success to rum group blockchain",
                     parse_mode="HTML",
                     reply_markup=reply_markup,
                     reply_to_message_id=update.message.message_id,
@@ -201,7 +217,7 @@ class DataExchanger:
         username = update.message.from_user.username
         userid = update.message.from_user.id
         # send to rum group
-        text = f"{update.message.text}\nFrom telegram chat {self.config.TG_GROUP_NAME}"
+        channel_message_id = None
         reply_id = None
         if update.message.reply_to_message:
             obj = self.db.get_first(
@@ -217,18 +233,32 @@ class DataExchanger:
                     },
                     "channel_message_id",
                 )
+                channel_message_id = (
+                    update.message.reply_to_message.forward_from_message_id
+                )
             if obj:
                 reply_id = obj.rum_post_id
+                channel_message_id = obj.channel_message_id
         else:
             _pinned = self.tg.get_chat(self.config.TG_GROUP_ID).pinned_message
             logger.debug("pinned message\n\n%s\n\n", _pinned)
+            channel_message_id = _pinned.forward_from_message_id
             reply_id = self.db.get_first(
                 Relation,
-                {"channel_message_id": _pinned.forward_from_message_id},
+                {"channel_message_id": channel_message_id},
                 "channel_message_id",
             ).rum_post_id
 
-        trx_id, rum_post_id, rum_post_url = self.send_to_rum(text, userid, reply_id)
+        trx_id, rum_post_id, rum_post_url = self.send_to_rum(
+            update.message.text,
+            userid,
+            reply_id,
+            {
+                "type": "telegram",
+                "name": f"@{username}",
+                "url": f"{self.config.TG_CHANNEL_URL}/{channel_message_id}",
+            },
+        )
         # update db
         payload = {
             "group_id": self.rum.group.group_id,
@@ -253,7 +283,6 @@ class DataExchanger:
         self.db.add_or_update(User, payload, "user_id")
         # send reply
         if reply_id is None:
-            reply = f"Success to rum group blockchain"
             reply_markup = {
                 "inline_keyboard": [
                     [{"text": "Click here to view", "url": rum_post_url}]
@@ -261,7 +290,7 @@ class DataExchanger:
             }
             resp = self.tg.send_message(
                 chat_id=update.message.chat.id,
-                text=reply,
+                text="Success to rum group blockchain",
                 parse_mode="HTML",
                 reply_markup=reply_markup,
                 reply_to_message_id=update.message.message_id,
