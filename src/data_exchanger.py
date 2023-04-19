@@ -82,7 +82,7 @@ class DataExchanger:
             userid,
             origin={
                 "type": "telegram",
-                "name": f"@{username}",
+                "name": self.config.TG_CHANNEL_NAME,
                 "url": f"{self.config.TG_CHANNEL_URL}/{resp.message_id}",
             },
         )
@@ -146,7 +146,7 @@ class DataExchanger:
                 userid,
                 origin={
                     "type": "telegram",
-                    "name": f"@{username}",
+                    "name": self.config.TG_CHANNEL_NAME,
                     "url": f"{self.config.TG_CHANNEL_URL}/{update.channel_post.message_id}",
                 },
             )
@@ -255,7 +255,7 @@ class DataExchanger:
             reply_id,
             {
                 "type": "telegram",
-                "name": f"@{username}",
+                "name": self.config.TG_CHANNEL_NAME,
                 "url": f"{self.config.TG_CHANNEL_URL}/{channel_message_id}",
             },
         )
