@@ -3,10 +3,11 @@ import logging
 import telegram
 from quorum_data_py import feed
 from quorum_mininode_py import MiniNode
-from telegram.ext import Filters, MessageHandler, Updater
+from quorum_mininode_py.crypto import account
+from telegram.ext import CommandHandler, Filters, MessageHandler, Updater
 
 from src.db_handle import DBHandle
-from src.module import Relation, User
+from src.module import Relation
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +39,10 @@ class DataExchanger:
         logger.warning("failed!!! get origin post id for %s", rum_post_id)
         return None
 
-    def send_to_rum(self, message, userid, reply_id=None, origin=None):
+    def send_to_rum(self, message, userid, username=None, reply_id=None, origin=None):
         """send text as trx to rum group chain"""
-        user = self.db.get_first(User, {"user_id": userid}, "user_id")
-        if user:
-            pvtkey = user.pvtkey
-        else:
-            pvtkey = None
-        self.rum.change_account(pvtkey)
+        user = self.db.init_user(userid, username)
+        self.rum.change_account(user.pvtkey)
 
         text = message.text or message.caption
         _photo = message.photo
@@ -68,7 +65,7 @@ class DataExchanger:
 
         resp = self.rum.api.post_content(data)
         post_id = self._get_origin_post_id(reply_id) or data["object"]["id"]
-        rum_post_url = f"{self.config.FEED_URL_BASE}{post_id}"
+        rum_post_url = f"{self.config.FEED_URL_BASE}/posts/{post_id}"
         logger.info("success: send_to_rum %s", resp["trx_id"])
         return {
             "group_id": self.rum.group.group_id,
@@ -99,16 +96,6 @@ class DataExchanger:
         )
         logger.info("send reply done")
 
-    def _db_user(self, userid, username):
-        payload = {
-            "user_id": userid,
-            "username": username,
-            "pvtkey": self.rum.account.pvtkey,
-            "pubkey": self.rum.account.pubkey,
-            "address": self.rum.account.address,
-        }
-        self.db.add_or_update(User, payload, "user_id")
-
     def handle_private_chat(self, update, context):
         """send message to rum group and telegram channel"""
         logger.info("handle_private_chat")
@@ -116,6 +103,8 @@ class DataExchanger:
         userid = update.message.from_user.id
         username = update.message.from_user.username
         _text = update.message.text or update.message.caption or ""
+        if _text.startswith("/profile"):
+            return self.command_profile(update, context)
         text = f"{_text}\n\nFrom telegram user @{username} through bot {self.config.TG_BOT_NAME}"
         _photo = update.message.photo
         if _photo:
@@ -141,7 +130,6 @@ class DataExchanger:
             }
         )
         self.db.add_or_update(Relation, relation, "trx_id")
-        self._db_user(userid, username)
         self._comment_with_feedurl(
             f" and to channel {self.config.TG_CHANNEL_NAME}",
             userid,
@@ -158,6 +146,7 @@ class DataExchanger:
         relation = self.send_to_rum(
             update.channel_post,
             userid,
+            update.channel_post.chat.username,
             origin=update.channel_post.message_id,
         )
         relation.update(
@@ -166,7 +155,6 @@ class DataExchanger:
             }
         )
         self.db.add_or_update(Relation, relation, "trx_id")
-        self._db_user(userid, update.channel_post.chat.username)
 
     def handle_channel_message(self, update, context):
         """send message to rum group"""
@@ -214,7 +202,6 @@ class DataExchanger:
                 channel_message_id = obj.channel_message_id
 
         if not channel_message_id and not reply_chat_message_id:
-            # get pinned
             _pinned = self.tg.get_chat(self.config.TG_GROUP_ID).pinned_message
             channel_message_id = _pinned.forward_from_message_id
             logger.info("get channel_message_id from pinned %s", channel_message_id)
@@ -222,7 +209,7 @@ class DataExchanger:
             logger.info("channel_message_id to reply_id %s", reply_id)
 
         relation = self.send_to_rum(
-            update.message, userid, reply_id, channel_message_id
+            update.message, userid, username, reply_id, channel_message_id
         )
         relation.update(
             {
@@ -232,7 +219,6 @@ class DataExchanger:
             }
         )
         self.db.add_or_update(Relation, relation, "trx_id")
-        self._db_user(userid, username)
 
     def handle_group_message(self, update, context):
         """handle group message"""
@@ -252,6 +238,7 @@ class DataExchanger:
         relation = self.send_to_rum(
             update.message,
             userid,
+            username,
             reply_id,
             channel_message_id,
         )
@@ -263,9 +250,139 @@ class DataExchanger:
             }
         )
         self.db.add_or_update(Relation, relation, "trx_id")
-        self._db_user(userid, username)
+
+    def command_start(self, update, context):
+        """/start command handler"""
+        logger.info("start command_start")
+        username = update.message.from_user.username or ""
+        text = f"Hello {username}! I'm {self.config.TG_BOT_NAME}. \nI can send your message (such as text, photo) as a new microblog from telgram to the blockchain of RUM network. \nTry to say something to me."
+        self.tg.send_message(
+            chat_id=update.message.chat_id,
+            text=text,
+            reply_to_message_id=update.message.message_id,
+        )
+
+    def command_profile(self, update, context):
+        """/profile command handler, change user name or avatar for the blockchain of rum network"""
+        logger.info("start command_name")
+        _text = update.message.text or update.message.caption or ""
+        name = _text.replace("/profile", "").strip(" '\"")
+        reply = f"Enter name: ```{name}```\n"
+
+        if len(name) > 32 or len(name) < 2:
+            return self.tg.send_message(
+                chat_id=update.message.chat_id,
+                text="Change your nickname or avatar for blockchian of rum group.\nUse command as `/profile your-nickname` , nickname should be 2-32 characters, and you can add a picture as avatar.",
+                reply_to_message_id=update.message.message_id,
+                parse_mode="Markdown",
+            )
+        logger.info("name: %s", name)
+        _photo = update.message.photo
+        if _photo:
+            avatar = bytes(_photo[-1].get_file().download_as_bytearray())
+        else:
+            avatar = None
+
+        if name or avatar:
+            user = self.db.init_user(
+                update.message.from_user.id, update.message.from_user.username
+            )
+            address = user.address
+            logger.info("address: %s", address)
+            data = feed.profile(name, avatar, address)
+            self.rum.change_account(user.pvtkey)
+            resp = self.rum.api.post_content(data)
+            if "trx_id" in resp:
+                reply += (
+                    f"Profile updated. View {self.config.FEED_URL_BASE}/users/{address}"
+                )
+            else:
+                reply += "Profile update failed. Please try again later."
+            logger.info("resp: %s", resp)
+
+        self.tg.send_message(
+            chat_id=update.message.chat_id,
+            text=reply,
+            reply_to_message_id=update.message.message_id,
+        )
+
+    def command_show_pvtkey(self, update, context):
+        logger.info("start command_show_pvtkey")
+        userid = update.message.from_user.id
+        username = update.message.from_user.username
+        chat_id = update.message.chat_id
+        message_id = update.message.message_id
+        user = self.db.init_user(userid, username)
+        if user:
+            text = f"Your private key is: \n```{user.pvtkey}```\nPlease keep it safe."
+        else:
+            text = f"show_key error {userid}"
+        self.tg.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_to_message_id=message_id,
+            parse_mode="Markdown",
+        )
+
+    def command_new_pvtkey(self, update, context):
+        logger.info("start command_new_pvtkey")
+        userid = update.message.from_user.id
+        username = update.message.from_user.username
+        chat_id = update.message.chat_id
+        message_id = update.message.message_id
+        user = self.db.init_user(userid, username, is_cover=True)
+        logger.info("user: %s", user)
+        if user:
+            text = (
+                f"Your new private key is: \n```{ user.pvtkey}```\nPlease keep it safe."
+            )
+        else:
+            text = f"new_key error {userid}"
+
+        self.tg.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_to_message_id=message_id,
+            parse_mode="Markdown",
+        )
+
+    def command_import_pvtkey(self, update, context):
+        logger.info("start command_import_pvtkey")
+        userid = update.message.from_user.id
+        username = update.message.from_user.username
+        chat_id = update.message.chat_id
+        message_id = update.message.message_id
+        _text = update.message.text or update.message.caption or ""
+        pvtkey = _text.replace("/import_pvtkey", "").strip(" '\"")
+        logger.info("import_key pvtkey: %s", pvtkey)
+        text = f"Try to import private key: \n```{pvtkey}```\n"
+        try:
+            account.private_key_to_pubkey(pvtkey)
+            user = self.db.init_user(userid, username, pvtkey=pvtkey, is_cover=True)
+            if user:
+                text += "Success. Please keep it safe."
+            else:
+                text += "Something wrong. Please try again later."
+        except:
+            text += "Please Use command as  `/import_key 0x5ee77ca3c261cdd...adeffaf`. Please check your private key and try again."
+
+        self.tg.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_to_message_id=message_id,
+            parse_mode="Markdown",
+        )
 
     def run(self):
+        self.dispatcher.add_handler(CommandHandler("start", self.command_start))
+        self.dispatcher.add_handler(CommandHandler("profile", self.command_profile))
+        self.dispatcher.add_handler(
+            CommandHandler("show_pvtkey", self.command_show_pvtkey)
+        )
+        # TODO: add logs to map userid and pvtkey
+        # self.dispatcher.add_handler( CommandHandler("new_pvtkey", self.command_new_pvtkey) )
+        # self.dispatcher.add_handler( CommandHandler("import_pvtkey", self.command_import_pvtkey)  )
+
         # private chat message:
         # send to tg channel and rum group as new post
         # reply the feed_post_url to user in private chat and the comment of the channel post

@@ -17,7 +17,7 @@ logger.debug("basedir: %s", basedir)
 class Config:
     RUM_SEED = "rum://seed?v=1&e=0&n=0&c=qOh_wTyuoKDoXxxxxxIaH5sa9TCLPkHCnpnROM8"
     ETH_PVTKEY = "0x5ee77ca3...effaf"
-    FEED_URL_BASE = "https://example/posts/"
+    FEED_URL_BASE = "https://example.com"
     TG_USER_ID = 123456789
     TG_CHANNEL_NAME = "@my_channel"
     TG_CHANNEL_URL = "https://t.me/my_channel"

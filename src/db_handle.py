@@ -1,9 +1,10 @@
 import logging
 
+from quorum_mininode_py.crypto import account
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.module import Base, Relation
+from src.module import Base, Relation, User
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,30 @@ class DBHandle:
         self.engine = create_engine(db_url, echo=echo)
         self.Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
+
+    def init_user(self, userid, username=None, pvtkey=None, is_cover=False):
+        logger.info("init_user: %s %s %s %s", userid, username, pvtkey, is_cover)
+        _user = self.get_first(User, {"user_id": userid}, "user_id")
+        if _user and not is_cover:
+            return _user
+        pvtkey = pvtkey or account.create_private_key()
+
+        try:
+            pubkey = account.private_key_to_pubkey(pvtkey)
+            address = account.private_key_to_address(pvtkey)
+        except Exception as err:
+            logger.error("init_user: %s", err)
+            return None
+
+        user = {
+            "user_id": userid,
+            "username": username,
+            "pvtkey": pvtkey,
+            "pubkey": pubkey,
+            "address": address,
+        }
+        self.add_or_update(User, user, "user_id")
+        return self.get_first(User, {"user_id": userid}, "user_id")
 
     def get_first(self, table, payload: dict, pk: str):
         logger.debug("start get_first:  %s\n%s", pk, payload)
