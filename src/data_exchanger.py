@@ -1,7 +1,9 @@
+import base64
+import datetime
 import logging
 
 import telegram
-from quorum_data_py import feed
+from quorum_data_py import feed, get_trx_type
 from quorum_mininode_py import MiniNode
 from quorum_mininode_py.crypto import account
 from telegram.ext import CommandHandler, Filters, MessageHandler, Updater
@@ -22,6 +24,7 @@ class DataExchanger:
         self.db = DBHandle(self.config.DB_URL, echo=self.config.DB_ECHO)
         self.updater = Updater(token=self.config.TG_BOT_TOKEN, use_context=True)
         self.dispatcher = self.updater.dispatcher
+        self.start_trx = None
 
     def _get_origin_post_id(self, rum_post_id: str):
         """get the origin post id for trx"""
@@ -41,6 +44,7 @@ class DataExchanger:
 
     def send_to_rum(self, message, userid, username=None, reply_id=None, origin=None):
         """send text as trx to rum group chain"""
+        logger.info("send_to_rum")
         user = self.db.init_user(userid, username)
         self.rum.change_account(user.pvtkey)
 
@@ -81,11 +85,9 @@ class DataExchanger:
         self, extend_text: str, userid, reply_to_message_id, rum_post_url
     ):
         """reply to user with rum post url"""
-        reply = "⚜️ 数据已上链 Success to rum group blockchain" + (extend_text or "")
+        reply = "⚜️ Success to blockchain of RumNetwork" + (extend_text or "")
         reply_markup = {
-            "inline_keyboard": [
-                [{"text": "Click here to view 点击查看", "url": rum_post_url}]
-            ]
+            "inline_keyboard": [[{"text": "Click here to view", "url": rum_post_url}]]
         }
         self.tg.send_message(
             chat_id=userid,
@@ -96,16 +98,96 @@ class DataExchanger:
         )
         logger.info("send reply done")
 
+    def handle_rum(self):
+        if self.start_trx is None:
+            trxs = self.rum.api.get_content(num=20, reverse=True)
+            if trxs:
+                self.start_trx = trxs[0]["TrxId"]
+        while True:
+            logger.info("handle_rum %s", self.start_trx)
+            start_trx = self._handle_rum(self.start_trx)
+            if start_trx == self.start_trx:
+                logger.info("no new trx")
+                break
+            self.start_trx = start_trx
+
+    def _handle_rum(self, start_trx):
+        trxs = self.rum.api.get_content(num=20, start_trx=start_trx)
+        for trx in trxs:
+            start_trx = trx["TrxId"]
+            trx_ts = int(str(trx["TimeStamp"])[:10])
+            trx_dt = datetime.datetime.utcfromtimestamp(trx_ts)
+            if get_trx_type(trx) != "post":
+                continue
+            if trx_dt < datetime.datetime.now() + datetime.timedelta(
+                hours=self.config.RUM_DELAY_HOURS
+            ):
+                continue
+            origin_url = trx["Data"].get("origin", {}).get("url", "")
+            if self.config.TG_CHANNEL_URL in origin_url:
+                continue
+            _text = trx["Data"]["object"].get("content", "")
+            _images = trx["Data"]["object"].get("image", [])
+            if not _text and not _images:
+                continue
+            if self.db.is_exist(Relation, {"trx_id": trx["TrxId"]}, "trx_id"):
+                continue
+            post_url = (
+                f'{self.config.FEED_URL_BASE}/posts/{trx["Data"]["object"]["id"]}'
+            )
+            relation = {
+                "group_id": self.rum.group.group_id,
+                "trx_id": trx["TrxId"],
+                "rum_post_id": trx["Data"]["object"]["id"],
+                "rum_post_url": post_url,
+                "user_id": self.config.TG_CHANNEL_ID,
+                "pubkey": trx["SenderPubkey"],
+                "trx_type": "post",
+            }
+            if _images:
+                for i, _image in enumerate(_images):
+                    resp = self.tg.send_photo(
+                        chat_id=self.config.TG_CHANNEL_NAME,
+                        photo=base64.b64decode(_image["content"].encode("utf-8")),
+                        caption=f"{i+1}/{len(_images)} {_text}\nFrom [{self.config.FEED_TITLE}]({post_url})",
+                        parse_mode="Markdown",
+                    )
+                    logger.info(resp)
+                    relation.update(
+                        {
+                            "channel_message_id": resp.message_id,
+                        }
+                    )
+                    self.db.add_or_update(Relation, relation, "trx_id")
+            elif _text:
+                resp = self.tg.send_message(
+                    chat_id=self.config.TG_CHANNEL_NAME,
+                    text=f"{_text}\nFrom [{self.config.FEED_TITLE}]({post_url})",
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True,
+                )
+                logger.info(resp)
+                relation.update(
+                    {
+                        "channel_message_id": resp.message_id,
+                    }
+                )
+                self.db.add_or_update(Relation, relation, "trx_id")
+        return start_trx
+
     def handle_private_chat(self, update, context):
         """send message to rum group and telegram channel"""
+        self.handle_rum()
         logger.info("handle_private_chat")
         message_id = update.message.message_id
         userid = update.message.from_user.id
-        username = update.message.from_user.username
+        _first_name = update.message.from_user.first_name
+        _last_name = update.message.from_user.last_name
+        _fullname = f"{_first_name} {_last_name}" if _last_name else _first_name
         _text = update.message.text or update.message.caption or ""
         if _text.startswith("/profile"):
             return self.command_profile(update, context)
-        text = f"{_text}\n\nFrom telegram user @{username} through bot {self.config.TG_BOT_NAME}"
+        text = f"{_text}\n\nFrom {_fullname} through telegram {self.config.TG_BOT_NAME}"
         _photo = update.message.photo
         if _photo:
             image = bytes(_photo[-1].get_file().download_as_bytearray())
@@ -114,7 +196,9 @@ class DataExchanger:
             )
         else:
             image = None
-            text = f"{_text}\nFrom telegram user @{username} through bot {self.config.TG_BOT_NAME}"
+            text = (
+                f"{_text}\nFrom {_fullname} through telegram {self.config.TG_BOT_NAME}"
+            )
             resp = self.tg.send_message(chat_id=self.config.TG_CHANNEL_NAME, text=text)
 
         relation = self.send_to_rum(
@@ -158,6 +242,7 @@ class DataExchanger:
 
     def handle_channel_message(self, update, context):
         """send message to rum group"""
+        self.handle_rum()
         logger.info("handle_channel_message")
         # channel post to rum group chain
         if update.channel_post:
@@ -167,9 +252,11 @@ class DataExchanger:
         chat_message_id = update.message.message_id
 
         # send reply to user in group chat
-        rum_post_url = self.db.get_trx_sent(channel_message_id).rum_post_url
+        rum_post_url = self.db.get_trx_sent(channel_message_id).rum_post_url  # TODO:
         if not rum_post_url:
             logger.warning("not found channel_message_id %s", channel_message_id)
+            return
+        if rum_post_url in update.message.text:
             return
         self._comment_with_feedurl(
             "", update.message.chat.id, chat_message_id, rum_post_url
@@ -182,6 +269,7 @@ class DataExchanger:
         self.db.add_or_update(Relation, payload, "chat_message_id")
 
     def _handle_reply_message(self, update, context):
+        self.handle_rum()
         logger.info("start handle_reply_message")
         username = update.message.from_user.username
         userid = update.message.from_user.id
@@ -222,7 +310,7 @@ class DataExchanger:
 
     def handle_group_message(self, update, context):
         """handle group message"""
-
+        self.handle_rum()
         if update.message.reply_to_message:
             self._handle_reply_message(update, context)
             return
@@ -253,6 +341,7 @@ class DataExchanger:
 
     def command_start(self, update, context):
         """/start command handler"""
+        self.handle_rum()
         logger.info("start command_start")
         username = update.message.from_user.username or ""
         text = f"Hello {username}! I'm {self.config.TG_BOT_NAME}. \nI can send your message (such as text, photo) as a new microblog from telgram to the blockchain of RUM network. \nTry to say something to me."
@@ -264,6 +353,7 @@ class DataExchanger:
 
     def command_profile(self, update, context):
         """/profile command handler, change user name or avatar for the blockchain of rum network"""
+        self.handle_rum()
         logger.info("start command_name")
         _text = update.message.text or update.message.caption or ""
         name = _text.replace("/profile", "").strip(" '\"")
@@ -307,6 +397,7 @@ class DataExchanger:
         )
 
     def command_show_pvtkey(self, update, context):
+        self.handle_rum()
         logger.info("start command_show_pvtkey")
         userid = update.message.from_user.id
         username = update.message.from_user.username
@@ -325,6 +416,7 @@ class DataExchanger:
         )
 
     def command_new_pvtkey(self, update, context):
+        self.handle_rum()
         logger.info("start command_new_pvtkey")
         userid = update.message.from_user.id
         username = update.message.from_user.username
@@ -347,6 +439,7 @@ class DataExchanger:
         )
 
     def command_import_pvtkey(self, update, context):
+        self.handle_rum()
         logger.info("start command_import_pvtkey")
         userid = update.message.from_user.id
         username = update.message.from_user.username
@@ -374,6 +467,7 @@ class DataExchanger:
         )
 
     def run(self):
+        self.handle_rum()
         self.dispatcher.add_handler(CommandHandler("start", self.command_start))
         self.dispatcher.add_handler(CommandHandler("profile", self.command_profile))
         self.dispatcher.add_handler(
