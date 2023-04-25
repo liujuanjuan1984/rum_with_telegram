@@ -5,7 +5,7 @@ import threading
 import time
 
 import telegram
-from quorum_data_py import feed, get_trx_type
+from quorum_data_py import feed, get_trx_type, util
 from quorum_mininode_py import MiniNode
 from quorum_mininode_py.crypto import account
 from telegram.ext import CommandHandler, Filters, MessageHandler, Updater
@@ -118,15 +118,14 @@ class DataExchanger:
         trxs = self.rum.api.get_content(num=20, start_trx=start_trx)
         for trx in trxs:
             start_trx = trx["TrxId"]
-            trx_ts = int(str(trx["TimeStamp"])[:10])
-            trx_dt = datetime.datetime.utcfromtimestamp(trx_ts)
             if trx["SenderPubkey"] in self.config.BLACK_LIST_PUBKEYS:
                 continue
             if get_trx_type(trx) != "post":
                 continue
-            if trx_dt < datetime.datetime.now() + datetime.timedelta(
-                hours=self.config.RUM_DELAY_HOURS
-            ):
+            trx_dt = util.get_published_datetime(trx)
+            if trx_dt < datetime.datetime.now(
+                datetime.timezone.utc
+            ) + datetime.timedelta(hours=self.config.RUM_DELAY_HOURS):
                 continue
             origin_url = trx["Data"].get("origin", {}).get("url", "")
             if self.config.TG_CHANNEL_URL in origin_url:
