@@ -96,13 +96,14 @@ class DataExchanger:
         rum_post_url,
     ):
         """reply to user with rum post url"""
-        reply = "⚜️ Success to blockchain of RumNetwork" + (extend_text or "")
-        reply_markup = {"inline_keyboard": [[{"text": "Click here to view", "url": rum_post_url}]]}
+        reply = f"⚜️ Success to blockchain.\n👉[{self.config.FEED_TITLE}]({rum_post_url})\n" + (
+            extend_text or ""
+        )
         await context.bot.send_message(
             chat_id=userid,
             text=reply,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
             reply_to_message_id=reply_to_message_id,
         )
         logger.info("send reply done")
@@ -162,8 +163,7 @@ class DataExchanger:
                     resp = await self.app.bot.send_photo(
                         chat_id=self.config.TG_CHANNEL_NAME,
                         photo=base64.b64decode(_image["content"].encode("utf-8")),
-                        caption=f"{i+1}/{len(_images)} {_text}\nFrom [{self.config.FEED_TITLE}]({post_url})",
-                        parse_mode="Markdown",
+                        caption=f"{i+1}/{len(_images)} {_text}",
                     )
                     relation.update(
                         {
@@ -174,9 +174,7 @@ class DataExchanger:
             elif _text:
                 resp = await self.app.bot.send_message(
                     chat_id=self.config.TG_CHANNEL_NAME,
-                    text=f"{_text}\nFrom [{self.config.FEED_TITLE}]({post_url})",
-                    parse_mode="Markdown",
-                    disable_web_page_preview=True,
+                    text=_text,
                 )
                 relation.update(
                     {
@@ -205,7 +203,7 @@ class DataExchanger:
         _text = update.message.text or update.message.caption or ""
         if _text.startswith("/profile"):
             return self.command_profile(update, context)
-        text = f"{_text}\n\nFrom {_fullname} through telegram {self.config.TG_BOT_NAME}"
+        text = f"{_text}\n\nFrom {_fullname} through {self.config.TG_BOT_NAME}"
         _photo = update.message.photo
         if _photo:
             image = await context.bot.get_file(_photo[-1].file_id)
@@ -215,7 +213,7 @@ class DataExchanger:
             )
         else:
             image = None
-            text = f"{_text}\nFrom {_fullname} through telegram {self.config.TG_BOT_NAME}"
+            text = f"{_text}\nFrom {_fullname} through {self.config.TG_BOT_NAME}"
             resp = await context.bot.send_message(chat_id=self.config.TG_CHANNEL_NAME, text=text)
 
         relation = await self.send_to_rum(
@@ -274,22 +272,13 @@ class DataExchanger:
         for i in range(5):
             rum_post_url = self.db.get_trx_sent(channel_message_id).rum_post_url
             if not rum_post_url:
-                logger.warning("not found channel_message_id %s", channel_message_id)
+                logger.warning("%s not found channel_message_id %s", i, channel_message_id)
                 await asyncio.sleep(0.5)
             else:
                 break
         if not rum_post_url:
             return
         logger.info("found rum_post_url %s", rum_post_url)
-        if entities := update.message.entities:
-            for entity in entities:
-                if entity.url == rum_post_url:
-                    return
-        if entities := update.message.caption_entities:
-            for entity in entities:
-                if entity.url == rum_post_url:
-                    return
-
         await self._comment_with_feedurl(
             context, "", update.message.chat.id, chat_message_id, rum_post_url
         )
@@ -370,7 +359,7 @@ class DataExchanger:
         _pinned = await bot.get_chat(self.config.TG_GROUP_ID)
         _pinned = _pinned.pinned_message
         channel_message_id = _pinned.forward_from_message_id
-        obj = self.db.get_trx_sent(channel_message_id)  # 可能为空。
+        obj = self.db.get_trx_sent(channel_message_id)
         if obj:
             reply_id = obj.rum_post_id
         else:
@@ -416,7 +405,6 @@ class DataExchanger:
                 chat_id=update.message.chat_id,
                 text="Change your nickname or avatar for blockchian of rum group.\nUse command as `/profile your-nickname` , nickname should be 2-32 characters, and you can add a picture as avatar.",
                 reply_to_message_id=update.message.message_id,
-                parse_mode="Markdown",
             )
             return
         _photo = update.message.photo
@@ -451,7 +439,7 @@ class DataExchanger:
         message_id = update.message.message_id
         user = self.db.init_user(userid, username)
         if user:
-            text = f"Your private key is: \n```{user.pvtkey}```\nPlease keep it safe."
+            text = f"Your private key is: \n```\n{user.pvtkey}\n```\nPlease keep it safe."
         else:
             text = f"show_key error {userid}"
         await context.bot.send_message(
@@ -469,7 +457,7 @@ class DataExchanger:
         message_id = update.message.message_id
         user = self.db.init_user(userid, username, is_cover=True)
         if user:
-            text = f"Your new private key is: \n```{ user.pvtkey}```\nPlease keep it safe."
+            text = f"Your new private key is: \n```\n{ user.pvtkey}\n```\nPlease keep it safe."
         else:
             text = f"new_key error {userid}"
 
@@ -488,7 +476,7 @@ class DataExchanger:
         message_id = update.message.message_id
         _text = update.message.text or update.message.caption or ""
         pvtkey = _text.replace("/import_pvtkey", "").strip(" '\"")
-        text = f"Try to import private key: \n```{pvtkey}```\n"
+        text = f"Try to import private key: \n```\n{pvtkey}\n```\n"
         try:
             account.private_key_to_pubkey(pvtkey)
             user = self.db.init_user(userid, username, pvtkey=pvtkey, is_cover=True)
@@ -498,7 +486,7 @@ class DataExchanger:
                 text += "Something wrong. Please try again later."
         except Exception as err:
             logger.error(err)
-            text += "Please Use command as  `/import_key 0x5ee77ca3c261cdd...adeffaf`. Please check your private key and try again."
+            text += "Please Use command as `/import_key 0x5ee77ca3c261cdd...adeffaf` . Please check your private key and try again."
 
         await context.bot.send_message(
             chat_id=chat_id,

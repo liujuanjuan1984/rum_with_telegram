@@ -133,3 +133,5 @@ local*.py
 my*.py
 try*.py 
 *copy*.py
+weibo_rum.py
+weibo_rum2.py
