@@ -30,6 +30,8 @@ class Config:
     DB_URL = f"sqlite3:///{basedir}/test_db.sqlite"
     DB_ECHO = False
     RUM_DELAY_HOURS = -1
+    BLACK_LIST_PUBKEYS = []
+    BLACK_LIST_TGIDS = []
 
 
 if __name__ == "__main__":

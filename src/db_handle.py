@@ -17,7 +17,6 @@ class DBHandle:
         Base.metadata.create_all(self.engine)
 
     def init_user(self, userid, username=None, pvtkey=None, is_cover=False):
-        logger.info("init_user: %s %s %s %s", userid, username, pvtkey, is_cover)
         _user = self.get_first(User, {"user_id": userid}, "user_id")
         if _user and not is_cover:
             return _user
@@ -41,17 +40,14 @@ class DBHandle:
         return self.get_first(User, {"user_id": userid}, "user_id")
 
     def get_first(self, table, payload: dict, pk: str):
-        logger.debug("start get_first:  %s\n%s", pk, payload)
         with self.Session() as session:
             return session.query(table).filter_by(**{pk: payload[pk]}).first()
 
     def get_all(self, table, payload: dict, pk: str):
-        logger.debug("start get_all:  %s\n%s", pk, payload)
         with self.Session() as session:
             return session.query(table).filter_by(**{pk: payload[pk]}).all()
 
     def get_trx_sent(self, channel_message_id):
-        logger.debug("start get_post_id:  %s", channel_message_id)
         with self.Session() as session:
             relatins = (
                 session.query(Relation)
@@ -64,16 +60,13 @@ class DBHandle:
         return None
 
     def is_exist(self, table, payload: dict, pk: str):
-        logger.debug("start is_exist: %s\n%s", pk, payload)
         with self.Session() as session:
             return session.query(table).filter_by(**{pk: payload[pk]}).count() > 0
 
     def add_or_update(self, table, payload, pk):
-        logger.debug("start add_or_update: %s\n%s", pk, payload)
         with self.Session() as session:
             obj = session.query(table).filter_by(**{pk: payload[pk]}).first()
             if obj:
-                logger.debug("update to db:\n%s", payload)
                 session.query(table).filter_by(**{pk: payload[pk]}).update(payload)
                 logger.info("update to db: %s %s", pk, payload[pk])
             else:
