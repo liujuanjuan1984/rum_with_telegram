@@ -1,17 +1,6 @@
-import logging
 import os
 
-from src import DataExchanger
-
-logging.basicConfig(
-    level=logging.INFO, format="%(name)s - %(asctime)s - %(levelname)s - %(message)s"
-)
-
-logger = logging.getLogger(__name__)
-
-
 basedir = os.path.dirname(__file__)
-logger.debug("basedir: %s", basedir)
 
 
 class Config:
@@ -32,8 +21,3 @@ class Config:
     RUM_DELAY_HOURS = -1
     BLACK_LIST_PUBKEYS = []
     BLACK_LIST_TGIDS = []
-
-
-if __name__ == "__main__":
-    config = Config()
-    DataExchanger(config).run()

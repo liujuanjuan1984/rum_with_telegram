@@ -4,7 +4,7 @@ from quorum_mininode_py.crypto import account
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.module import Base, Relation, User
+from rum_with_telegram.module import Base, Relation, User
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +50,7 @@ class DBHandle:
     def get_trx_sent(self, channel_message_id):
         with self.Session() as session:
             relatins = (
-                session.query(Relation)
-                .filter_by(channel_message_id=channel_message_id)
-                .all()
+                session.query(Relation).filter_by(channel_message_id=channel_message_id).all()
             )
             for i in relatins:
                 if i.trx_id:

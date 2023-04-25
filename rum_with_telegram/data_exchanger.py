@@ -7,16 +7,10 @@ from quorum_data_py import feed, get_trx_type, util
 from quorum_mininode_py import MiniNode
 from quorum_mininode_py.crypto import account
 from telegram import Bot, Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from src.db_handle import DBHandle
-from src.module import Relation
+from rum_with_telegram.db_handle import DBHandle
+from rum_with_telegram.module import Relation
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +42,13 @@ class DataExchanger:
         return None
 
     async def send_to_rum(
-        self, context, message, userid, username=None, reply_id=None, origin=None
+        self,
+        context,
+        message,
+        userid,
+        username=None,
+        reply_id=None,
+        origin=None,
     ):
         """send text as trx to rum group chain"""
         logger.info("start send_to_rum")
@@ -88,13 +88,16 @@ class DataExchanger:
         }
 
     async def _comment_with_feedurl(
-        self, context, extend_text: str, userid, reply_to_message_id, rum_post_url
+        self,
+        context,
+        extend_text: str,
+        userid,
+        reply_to_message_id,
+        rum_post_url,
     ):
         """reply to user with rum post url"""
         reply = "⚜️ Success to blockchain of RumNetwork" + (extend_text or "")
-        reply_markup = {
-            "inline_keyboard": [[{"text": "Click here to view", "url": rum_post_url}]]
-        }
+        reply_markup = {"inline_keyboard": [[{"text": "Click here to view", "url": rum_post_url}]]}
         await context.bot.send_message(
             chat_id=userid,
             text=reply,
@@ -128,9 +131,9 @@ class DataExchanger:
             if get_trx_type(trx) != "post":
                 continue
             trx_dt = util.get_published_datetime(trx)
-            if trx_dt < datetime.datetime.now(
-                datetime.timezone.utc
-            ) + datetime.timedelta(hours=self.config.RUM_DELAY_HOURS):
+            if trx_dt < datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+                hours=self.config.RUM_DELAY_HOURS
+            ):
                 continue
             origin_url = trx["Data"].get("origin", {}).get("url", "")
             if self.config.TG_CHANNEL_URL in origin_url:
@@ -141,9 +144,7 @@ class DataExchanger:
                 continue
             if self.db.is_exist(Relation, {"trx_id": trx["TrxId"]}, "trx_id"):
                 continue
-            post_url = (
-                f'{self.config.FEED_URL_BASE}/posts/{trx["Data"]["object"]["id"]}'
-            )
+            post_url = f'{self.config.FEED_URL_BASE}/posts/{trx["Data"]["object"]["id"]}'
             logger.info("new post from rum %s", post_url)
             relation = {
                 "group_id": self.rum.group.group_id,
@@ -186,9 +187,7 @@ class DataExchanger:
             await asyncio.sleep(1)
         return start_trx
 
-    async def handle_private_chat(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
+    async def handle_private_chat(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """send message to rum group and telegram channel"""
         message_id = update.message.message_id
         logger.info("handle_private_chat %s", message_id)
@@ -216,12 +215,8 @@ class DataExchanger:
             )
         else:
             image = None
-            text = (
-                f"{_text}\nFrom {_fullname} through telegram {self.config.TG_BOT_NAME}"
-            )
-            resp = await context.bot.send_message(
-                chat_id=self.config.TG_CHANNEL_NAME, text=text
-            )
+            text = f"{_text}\nFrom {_fullname} through telegram {self.config.TG_BOT_NAME}"
+            resp = await context.bot.send_message(chat_id=self.config.TG_CHANNEL_NAME, text=text)
 
         relation = await self.send_to_rum(
             context,
@@ -245,9 +240,7 @@ class DataExchanger:
             relation.get("rum_post_url"),
         )
 
-    async def _handle_channel_post(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
+    async def _handle_channel_post(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """send message to rum group"""
         logger.info("handle_channel_post %s", update.channel_post.message_id)
         # channel post to rum group chain
@@ -267,9 +260,7 @@ class DataExchanger:
         )
         self.db.add_or_update(Relation, relation, "trx_id")
 
-    async def handle_channel_message(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
+    async def handle_channel_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """send message to rum group"""
         # channel post to rum group chain
         if update.channel_post:
@@ -280,13 +271,25 @@ class DataExchanger:
         chat_message_id = update.message.message_id
 
         # send reply to user in group chat
-        rum_post_url = self.db.get_trx_sent(channel_message_id).rum_post_url
+        for i in range(5):
+            rum_post_url = self.db.get_trx_sent(channel_message_id).rum_post_url
+            if not rum_post_url:
+                logger.warning("not found channel_message_id %s", channel_message_id)
+                await asyncio.sleep(0.5)
+            else:
+                break
         if not rum_post_url:
-            logger.warning("not found channel_message_id %s", channel_message_id)
             return
-        _text = update.message.text or update.message.caption or ""
-        if rum_post_url in _text:
-            return
+        logger.info("found rum_post_url %s", rum_post_url)
+        if entities := update.message.entities:
+            for entity in entities:
+                if entity.url == rum_post_url:
+                    return
+        if entities := update.message.caption_entities:
+            for entity in entities:
+                if entity.url == rum_post_url:
+                    return
+
         await self._comment_with_feedurl(
             context, "", update.message.chat.id, chat_message_id, rum_post_url
         )
@@ -297,9 +300,7 @@ class DataExchanger:
         }
         self.db.add_or_update(Relation, payload, "chat_message_id")
 
-    async def _handle_reply_message(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
+    async def _handle_reply_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("start handle_reply_message %s", update.message.message_id)
         username = update.message.from_user.username
         userid = update.message.from_user.id
@@ -329,7 +330,12 @@ class DataExchanger:
             logger.info("channel_message_id to reply_id %s", reply_id)
 
         relation = await self.send_to_rum(
-            context, update.message, userid, username, reply_id, channel_message_id
+            context,
+            update.message,
+            userid,
+            username,
+            reply_id,
+            channel_message_id,
         )
         relation.update(
             {
@@ -340,9 +346,7 @@ class DataExchanger:
         )
         self.db.add_or_update(Relation, relation, "trx_id")
 
-    async def handle_group_message(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
+    async def handle_group_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """handle group message"""
         userid = update.message.from_user.id
         if userid in self.config.BLACK_LIST_TGIDS:
@@ -423,17 +427,13 @@ class DataExchanger:
             avatar = None
 
         if name or avatar:
-            user = self.db.init_user(
-                update.message.from_user.id, update.message.from_user.username
-            )
+            user = self.db.init_user(update.message.from_user.id, update.message.from_user.username)
             address = user.address
             data = feed.profile(name, avatar, address)
             self.rum.change_account(user.pvtkey)
             resp = self.rum.api.post_content(data)
             if "trx_id" in resp:
-                reply += (
-                    f"Profile updated. View {self.config.FEED_URL_BASE}/users/{address}"
-                )
+                reply += f"Profile updated. View {self.config.FEED_URL_BASE}/users/{address}"
             else:
                 reply += "Profile update failed. Please try again later."
 
@@ -443,9 +443,7 @@ class DataExchanger:
             reply_to_message_id=update.message.message_id,
         )
 
-    async def command_show_pvtkey(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
+    async def command_show_pvtkey(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("start command_show_pvtkey")
         userid = update.message.from_user.id
         username = update.message.from_user.username
@@ -463,9 +461,7 @@ class DataExchanger:
             parse_mode="Markdown",
         )
 
-    async def command_new_pvtkey(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
+    async def command_new_pvtkey(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("start command_new_pvtkey")
         userid = update.message.from_user.id
         username = update.message.from_user.username
@@ -473,9 +469,7 @@ class DataExchanger:
         message_id = update.message.message_id
         user = self.db.init_user(userid, username, is_cover=True)
         if user:
-            text = (
-                f"Your new private key is: \n```{ user.pvtkey}```\nPlease keep it safe."
-            )
+            text = f"Your new private key is: \n```{ user.pvtkey}```\nPlease keep it safe."
         else:
             text = f"new_key error {userid}"
 
@@ -486,9 +480,7 @@ class DataExchanger:
             parse_mode="Markdown",
         )
 
-    async def command_import_pvtkey(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
+    async def command_import_pvtkey(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("start command_import_pvtkey")
         userid = update.message.from_user.id
         username = update.message.from_user.username
@@ -521,9 +513,7 @@ class DataExchanger:
         self.app.add_handler(CommandHandler("show_pvtkey", self.command_show_pvtkey))
         # TODO: add logs to map userid and pvtkey
         self.app.add_handler(CommandHandler("new_pvtkey", self.command_new_pvtkey))
-        self.app.add_handler(
-            CommandHandler("import_pvtkey", self.command_import_pvtkey)
-        )
+        self.app.add_handler(CommandHandler("import_pvtkey", self.command_import_pvtkey))
 
         content_handle = (filters.TEXT | filters.PHOTO) & ~filters.COMMAND
         # private chat message:
