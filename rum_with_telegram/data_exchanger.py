@@ -9,6 +9,7 @@ from quorum_mininode_py.crypto import account
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
+from rum_with_telegram.config import get_config
 from rum_with_telegram.db_handle import DBHandle
 from rum_with_telegram.module import Relation
 
@@ -18,8 +19,13 @@ logger = logging.getLogger(__name__)
 class DataExchanger:
     """the data exchanger between telegram bot/channel/chat-group and rum group-chain"""
 
-    def __init__(self, config):
-        self.config = config
+    def __init__(self, config: dict = None, json_config_file: str = None):
+        if isinstance(config, str):
+            json_config_file = config
+            config = None
+        self.config = config or get_config(json_config_file)
+        if not self.config:
+            raise Exception("config is None")
         self.rum = MiniNode(self.config.RUM_SEED, self.config.ETH_PVTKEY)
         self.app = Application.builder().token(self.config.TG_BOT_TOKEN).build()
         self.db = DBHandle(self.config.DB_URL, echo=self.config.DB_ECHO)
@@ -65,6 +71,7 @@ class DataExchanger:
         if reply_id:
             data = feed.reply(content=text, images=images, reply_id=reply_id)
         else:
+            text += f" {self.config.RUM_POST_FOOTER}"
             data = feed.new_post(content=text, images=images)
         if origin:
             data["origin"] = {
@@ -96,7 +103,9 @@ class DataExchanger:
         rum_post_url,
     ):
         """reply to user with rum post url"""
-        reply = f"⚜️ Success to blockchain.\n👉[{self.config.FEED_TITLE}]({rum_post_url})\n" + (
+        if not self.config.TG_REPLY_POSTURL:
+            return
+        reply = f"⚜️ Success to blockchain.\n👉[{self.config.FEED_TITLE}]({rum_post_url})" + (
             extend_text or ""
         )
         await context.bot.send_message(
@@ -232,7 +241,7 @@ class DataExchanger:
         self.db.add_or_update(Relation, relation, "trx_id")
         await self._comment_with_feedurl(
             context,
-            f" and to channel {self.config.TG_CHANNEL_NAME}",
+            f" and to [{self.config.TG_CHANNEL_NAME}]({self.config.TG_CHANNEL_URL}/{resp.message_id})",
             userid,
             message_id,
             relation.get("rum_post_url"),
@@ -270,13 +279,17 @@ class DataExchanger:
 
         # send reply to user in group chat
         for i in range(5):
-            rum_post_url = self.db.get_trx_sent(channel_message_id).rum_post_url
+            obj = self.db.get_trx_sent(channel_message_id)
+            if not obj:
+                await asyncio.sleep(0.5)
+                continue
+            rum_post_url = obj.rum_post_url
             if not rum_post_url:
-                logger.warning("%s not found channel_message_id %s", i, channel_message_id)
                 await asyncio.sleep(0.5)
             else:
                 break
         if not rum_post_url:
+            logger.warning("%s not found channel_message_id %s", i, channel_message_id)
             return
         logger.info("found rum_post_url %s", rum_post_url)
         await self._comment_with_feedurl(
@@ -298,14 +311,15 @@ class DataExchanger:
         reply_chat_message_id = reply_msg.message_id
         reply_id = None
         if channel_message_id:
-            reply_id = self.db.get_trx_sent(channel_message_id).rum_post_id
+            obj = self.db.get_trx_sent(channel_message_id)
+            reply_id = obj.rum_post_id if obj else None
         elif reply_chat_message_id:
             obj = self.db.get_first(
                 Relation,
                 {"chat_message_id": reply_chat_message_id},
                 "chat_message_id",
             )
-            reply_id = obj.rum_post_id
+            reply_id = obj.rum_post_id if obj else None
             if obj and not channel_message_id:
                 channel_message_id = obj.channel_message_id
 
@@ -495,6 +509,23 @@ class DataExchanger:
             parse_mode="Markdown",
         )
 
+    async def command_my_nft(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logger.info("start command_my_nft")
+        # TODO
+
+    async def command_grant_nft(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logger.info("start command_grant_nft")
+        userid = update.message.from_user.id
+        if userid not in self.config.ADMIN_USERIDS:
+            reply = "You are not admin."
+            await context.bot.send_message(
+                chat_id=update.message.chat_id,
+                text=reply,
+                reply_to_message_id=update.message.message_id,
+            )
+            return
+        # TODO
+
     def run(self):
         self.app.add_handler(CommandHandler("start", self.command_start))
         self.app.add_handler(CommandHandler("profile", self.command_profile))
@@ -502,14 +533,17 @@ class DataExchanger:
         # TODO: add logs to map userid and pvtkey
         self.app.add_handler(CommandHandler("new_pvtkey", self.command_new_pvtkey))
         self.app.add_handler(CommandHandler("import_pvtkey", self.command_import_pvtkey))
+        # TODO:
+        self.app.add_handler(CommandHandler("my_nft", self.command_my_nft))
+        self.app.add_handler(CommandHandler("grant_nft", self.command_grant_nft))
 
-        content_handle = (filters.TEXT | filters.PHOTO) & ~filters.COMMAND
+        content_filter = (filters.TEXT | filters.PHOTO) & ~filters.COMMAND
         # private chat message:
         # send to tg channel and rum group as new post
         # reply the feed_post_url to user in private chat and the comment of the channel post
         self.app.add_handler(
             MessageHandler(
-                content_handle & filters.ChatType.PRIVATE,
+                content_filter & filters.ChatType.PRIVATE,
                 self.handle_private_chat,
             )
         )
@@ -517,7 +551,7 @@ class DataExchanger:
         # send to rum group as new post; and reply to user in group chat
         self.app.add_handler(
             MessageHandler(
-                content_handle & filters.SenderChat(self.config.TG_CHANNEL_ID),
+                content_filter & filters.SenderChat(self.config.TG_CHANNEL_ID),
                 self.handle_channel_message,
             )
         )
@@ -525,7 +559,7 @@ class DataExchanger:
         # send to rum group as comment of the pinned post or the reply-to post
         self.app.add_handler(
             MessageHandler(
-                content_handle & filters.SenderChat.SUPER_GROUP,
+                content_filter & filters.SenderChat.SUPER_GROUP,
                 self.handle_group_message,
             )
         )

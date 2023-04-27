@@ -135,3 +135,6 @@ try*.py
 *copy*.py
 weibo_rum.py
 weibo_rum2.py
+local*/
+example/local*.*
+temp*.py

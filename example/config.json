@@ -1,0 +1,22 @@
+{
+    "BLACK_LIST_PUBKEYS": ["AtgOcDOSfzZfZgJ4L2cDBJBK37V79YVUTQq0U2IYfKIG"],
+    "BLACK_LIST_TGIDS": ["123456789"],
+    "ADMIN_USERIDS":[],
+    "DB_ECHO": false,
+    "DB_URL": "sqlite:///D:\\Jupyter\\my_repos_about_rum/test_db.sqlite",
+    "ETH_PVTKEY": "0x5ee77ca3...effaf",
+    "FEED_TITLE": "My Feed",
+    "FEED_URL_BASE": "https://example.com",
+    "RUM_DELAY_HOURS": -1,
+    "RUM_POST_FOOTER": "#TelegramTest ",
+    "RUM_SEED": "rum://seed?v=1&e=0&n=0&c=qOh_wTyuoKDoXxxxxxIaH5sa9TCLPkHCnpnROM8",
+    "TG_BOT_NAME": "@MyBotName",
+    "TG_BOT_TOKEN": "1234566767:mybotkey",
+    "TG_CHANNEL_ID": -100123456678,
+    "TG_CHANNEL_NAME": "@my_channel",
+    "TG_CHANNEL_URL": "https://t.me/my_channel",
+    "TG_GROUP_ID": -1001234567876,
+    "TG_GROUP_NAME": "@my_group",
+    "TG_REPLY_POSTURL": true,
+    "TG_USER_ID": 123456789
+}

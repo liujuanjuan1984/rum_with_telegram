@@ -1,7 +1,8 @@
 import logging
+import os
+import sys
 
-from config import Config
-
+# sys.path.insert(0, "./rum_with_telegram")
 from rum_with_telegram import DataExchanger
 
 logging.basicConfig(
@@ -9,6 +10,10 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
 )
 
+args = sys.argv[1:]
+if args:
+    config_file = args[0]
+else:
+    config_file = "config.json"
 
-config = Config()
-DataExchanger(config).run()
+DataExchanger(config_file).run()
