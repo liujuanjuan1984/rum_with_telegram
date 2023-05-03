@@ -12,19 +12,19 @@ class Config:
     ETH_PVTKEY: str
     FEED_URL_BASE: str
     FEED_TITLE: str
-    TG_USER_ID: int
     TG_CHANNEL_NAME: str
     TG_CHANNEL_URL: str
-    TG_CHANNEL_ID: int
     TG_BOT_TOKEN: str
     TG_BOT_NAME: str
     TG_GROUP_NAME: str
-    TG_GROUP_ID: int
     DB_URL: str
     DB_ECHO: bool
     RUM_DELAY_HOURS: int
     RUM_POST_FOOTER: str
     TG_REPLY_POSTURL: bool
+    TG_USER_ID: int
+    TG_CHANNEL_ID: int = None
+    TG_GROUP_ID: int = None
 
 
 def read_json(json_file: str):

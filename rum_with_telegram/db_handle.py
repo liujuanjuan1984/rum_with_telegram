@@ -49,12 +49,19 @@ class DBHandle:
 
     def get_trx_sent(self, channel_message_id):
         with self.Session() as session:
-            relatins = (
+            relation = (
+                session.query(Relation)
+                .filter_by(channel_message_id=channel_message_id, chat_type="private")
+                .first()
+            )
+            if relation and relation.trx_id:
+                return relation
+            relations = (
                 session.query(Relation).filter_by(channel_message_id=channel_message_id).all()
             )
-            for i in relatins:
-                if i.trx_id:
-                    return i
+            for relation in relations:
+                if relation.trx_id:
+                    return relation
         return None
 
     def is_exist(self, table, payload: dict, pk: str):

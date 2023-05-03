@@ -211,7 +211,8 @@ class DataExchanger:
         _fullname = f"{_first_name} {_last_name}" if _last_name else _first_name
         _text = update.message.text or update.message.caption or ""
         if _text.startswith("/profile"):
-            return self.command_profile(update, context)
+            await self.command_profile(update, context)
+            return
         text = f"{_text}\n\nFrom {_fullname} through {self.config.TG_BOT_NAME}"
         _photo = update.message.photo
         if _photo:
@@ -453,7 +454,7 @@ class DataExchanger:
         message_id = update.message.message_id
         user = self.db.init_user(userid, username)
         if user:
-            text = f"Your private key is: \n```\n{user.pvtkey}\n```\nPlease keep it safe."
+            text = f"Your private key (please keep it safe) is: \n```\n{user.pvtkey}\n```\nYour Address (can show to others) is:\n```\n{user.address}\n```"
         else:
             text = f"show_key error {userid}"
         await context.bot.send_message(
@@ -471,7 +472,7 @@ class DataExchanger:
         message_id = update.message.message_id
         user = self.db.init_user(userid, username, is_cover=True)
         if user:
-            text = f"Your new private key is: \n```\n{ user.pvtkey}\n```\nPlease keep it safe."
+            text = f"Your private key (please keep it safe) is: \n```\n{user.pvtkey}\n```\nYour Address (can show to others) is:\n```\n{user.address}\n```"
         else:
             text = f"new_key error {userid}"
 
@@ -559,7 +560,7 @@ class DataExchanger:
         # send to rum group as comment of the pinned post or the reply-to post
         self.app.add_handler(
             MessageHandler(
-                content_filter & filters.SenderChat.SUPER_GROUP,
+                content_filter & (filters.ChatType.SUPERGROUP | filters.SenderChat.SUPER_GROUP),
                 self.handle_group_message,
             )
         )
