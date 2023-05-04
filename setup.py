@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="rum_with_telegram",
-    version="0.8.7",
+    version="0.9.4",
     author="liujuanjuan1984",
     author_email="qiaoanlu@163.com",
     description="A bot, send telegram update to rum group as trx, and get new trx from rum group to channel.",
@@ -31,9 +31,8 @@ setuptools.setup(
     python_requires=">=3.7",
     install_requires=[
         "python-telegram-bot==20.2",
-        "quorum-data-py",
+        "quorum-data-py>=1.2.7",
         "quorum-mininode-py",
         "sqlalchemy",
-        "eth-account==0.5.8",
     ],
 )

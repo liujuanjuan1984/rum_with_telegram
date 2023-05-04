@@ -38,5 +38,13 @@ class User(Base):
     pvtkey = Column(String, unique=True, default=None)
     pubkey = Column(String, unique=True, default=None)
     address = Column(String, unique=True, default=None)
+    export_at = Column(DateTime, default=None)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
+
+
+class UsedKey(Base):
+    __tablename__ = "used_keys"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, index=True)
+    pvtkey = Column(String)

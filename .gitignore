@@ -138,3 +138,4 @@ weibo_rum2.py
 local*/
 example/local*.*
 temp*.py
+*/*.sh 

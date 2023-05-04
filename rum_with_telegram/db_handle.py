@@ -1,10 +1,11 @@
 import logging
 
-from quorum_mininode_py.crypto import account
+from quorum_mininode_py import RumAccount
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql import func
 
-from rum_with_telegram.module import Base, Relation, User
+from rum_with_telegram.module import Base, Relation, UsedKey, User
 
 logger = logging.getLogger(__name__)
 
@@ -17,31 +18,29 @@ class DBHandle:
         Base.metadata.create_all(self.engine)
 
     def init_user(self, userid, username=None, pvtkey=None, is_cover=False):
-        _user = self.get_first(User, {"user_id": userid}, "user_id")
-        if _user and not is_cover:
-            return _user
-        pvtkey = pvtkey or account.create_private_key()
-
-        try:
-            pubkey = account.private_key_to_pubkey(pvtkey)
-            address = account.private_key_to_address(pvtkey)
-        except Exception as err:
-            logger.error("init_user: %s", err)
-            return None
-
+        _user = self.get_first_user(userid)
+        if _user:
+            if not is_cover:
+                return _user
+            used = {"user_id": userid, "pvtkey": _user.pvtkey}
+            self.add_or_update(UsedKey, used, "user_id")
+        account = RumAccount(pvtkey=pvtkey)
         user = {
             "user_id": userid,
             "username": username,
-            "pvtkey": pvtkey,
-            "pubkey": pubkey,
-            "address": address,
+            "pvtkey": account.pvtkey,
+            "pubkey": account.pubkey,
+            "address": account.address,
         }
         self.add_or_update(User, user, "user_id")
-        return self.get_first(User, {"user_id": userid}, "user_id")
+        return self.get_first_user(userid)
 
     def get_first(self, table, payload: dict, pk: str):
         with self.Session() as session:
             return session.query(table).filter_by(**{pk: payload[pk]}).first()
+
+    def get_first_user(self, userid):
+        return self.get_first(User, {"user_id": userid}, "user_id")
 
     def get_all(self, table, payload: dict, pk: str):
         with self.Session() as session:
@@ -83,3 +82,6 @@ class DBHandle:
             except Exception as err:
                 session.rollback()
                 logger.info(err)
+
+    def update_user_export_at(self, userid):
+        return self.add_or_update(User, {"user_id": userid, "export_at": func.now()}, "user_id")

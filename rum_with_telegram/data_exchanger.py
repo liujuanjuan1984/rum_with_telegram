@@ -1,17 +1,18 @@
 import asyncio
 import base64
 import datetime
+import io
+import json
 import logging
 
 from quorum_data_py import feed, get_trx_type, util
-from quorum_mininode_py import MiniNode
-from quorum_mininode_py.crypto import account
+from quorum_mininode_py import MiniNode, pvtkey_to_pubkey
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from rum_with_telegram.config import get_config
 from rum_with_telegram.db_handle import DBHandle
-from rum_with_telegram.module import Relation
+from rum_with_telegram.module import Relation, UsedKey
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,9 @@ class DataExchanger:
         logger.info("send reply done")
 
     async def handle_rum(self):
+        if not self.config.RUM_TO_TG:
+            logger.warning("config.RUM_TO_TG is False")
+            return
         if self.start_trx is None:
             trxs = self.rum.api.get_content(num=20, reverse=True)
             if trxs:
@@ -139,6 +143,9 @@ class DataExchanger:
             if trx["SenderPubkey"] in self.config.BLACK_LIST_PUBKEYS:
                 continue
             if get_trx_type(trx) != "post":
+                continue
+            _tag = self.config.RUM_TO_TG_TAG
+            if _tag and _tag not in trx["Data"]["object"]["content"]:
                 continue
             trx_dt = util.get_published_datetime(trx)
             if trx_dt < datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
@@ -200,11 +207,7 @@ class DataExchanger:
         logger.info("handle_private_chat %s", message_id)
         userid = update.message.from_user.id
         if userid in self.config.BLACK_LIST_TGIDS:
-            await context.bot.send_message(
-                chat_id=userid,
-                text="You are in the blacklist.",
-                reply_to_message_id=update.message.message_id,
-            )
+            await update.message.reply_text("You are in the blacklist.")
             return
         _first_name = update.message.from_user.first_name
         _last_name = update.message.from_user.last_name
@@ -354,11 +357,7 @@ class DataExchanger:
         """handle group message"""
         userid = update.message.from_user.id
         if userid in self.config.BLACK_LIST_TGIDS:
-            await context.bot.send_message(
-                chat_id=userid,
-                text="You are in the blacklist.",
-                reply_to_message_id=update.message.message_id,
-            )
+            await update.message.reply_text("You are in the blacklist.")
             return
 
         if update.message.reply_to_message:
@@ -402,25 +401,18 @@ class DataExchanger:
         logger.info("start command_start %s", update.message.message_id)
         username = update.message.from_user.username or ""
         text = f"Hello {username}! I'm {self.config.TG_BOT_NAME}. \nI can send your message (such as text, photo) as a new microblog from telgram to the blockchain of RUM network. \nTry to say something to me."
-        await context.bot.send_message(
-            chat_id=update.message.chat_id,
-            text=text,
-            reply_to_message_id=update.message.message_id,
-        )
+        await update.message.reply_text(text)
 
     async def command_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/profile command handler, change user name or avatar for the blockchain of rum network"""
         logger.info("start command_name %s", update.message.message_id)
         _text = update.message.text or update.message.caption or ""
-        name = _text.replace("/profile", "").strip(" '\"")
+        name = _text.replace("/profile", "").strip("\n '\"")
         reply = f"Enter name: ```{name}```\n"
 
         if len(name) > 32 or len(name) < 2:
-            await context.bot.send_message(
-                chat_id=update.message.chat_id,
-                text="Change your nickname or avatar for blockchian of rum group.\nUse command as `/profile your-nickname` , nickname should be 2-32 characters, and you can add a picture as avatar.",
-                reply_to_message_id=update.message.message_id,
-            )
+            reply = "Change your nickname or avatar for blockchian of rum group.\nUse command as `/profile your-nickname` , nickname should be 2-32 characters, and you can add a picture as avatar."
+            await update.message.reply_text(reply)
             return
         _photo = update.message.photo
         if _photo:
@@ -440,60 +432,46 @@ class DataExchanger:
             else:
                 reply += "Profile update failed. Please try again later."
 
-        await context.bot.send_message(
-            chat_id=update.message.chat_id,
-            text=reply,
-            reply_to_message_id=update.message.message_id,
-        )
+        await update.message.reply_text(reply)
 
     async def command_show_pvtkey(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logger.info("start command_show_pvtkey")
+        logger.info("start command_show_pvtkey %s", update.message.message_id)
         userid = update.message.from_user.id
         username = update.message.from_user.username
-        chat_id = update.message.chat_id
-        message_id = update.message.message_id
         user = self.db.init_user(userid, username)
+        used = self.db.get_all(UsedKey, {"user_id": userid}, "user_id") or []
         if user:
-            text = f"Your private key (please keep it safe) is: \n```\n{user.pvtkey}\n```\nYour Address (can show to others) is:\n```\n{user.address}\n```"
+            text = f"Your private key (please keep it safe) now is: \n```\n{user.pvtkey}\n```\nYour Address (can show to others)  now is:\n```\n{user.address}\n```"
+            if used:
+                text += "\n\nUsed private key (please keep it safe) is: \n"
+                for i in used:
+                    text += f"\n```\n{i.pvtkey}\n```\n"
         else:
             text = f"show_key error {userid}"
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_to_message_id=message_id,
-            parse_mode="Markdown",
-        )
+
+        await update.message.reply_text(text, parse_mode="Markdown")
 
     async def command_new_pvtkey(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logger.info("start command_new_pvtkey")
+        logger.info("start command_new_pvtkey %s", update.message.message_id)
         userid = update.message.from_user.id
         username = update.message.from_user.username
-        chat_id = update.message.chat_id
-        message_id = update.message.message_id
         user = self.db.init_user(userid, username, is_cover=True)
         if user:
             text = f"Your private key (please keep it safe) is: \n```\n{user.pvtkey}\n```\nYour Address (can show to others) is:\n```\n{user.address}\n```"
         else:
             text = f"new_key error {userid}"
 
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_to_message_id=message_id,
-            parse_mode="Markdown",
-        )
+        await update.message.reply_text(text, parse_mode="Markdown")
 
     async def command_import_pvtkey(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logger.info("start command_import_pvtkey")
+        logger.info("start command_import_pvtkey %s", update.message.message_id)
         userid = update.message.from_user.id
         username = update.message.from_user.username
-        chat_id = update.message.chat_id
-        message_id = update.message.message_id
         _text = update.message.text or update.message.caption or ""
-        pvtkey = _text.replace("/import_pvtkey", "").strip(" '\"")
+        pvtkey = _text.replace("/import_pvtkey", "").strip("\n '\"")
         text = f"Try to import private key: \n```\n{pvtkey}\n```\n"
         try:
-            account.private_key_to_pubkey(pvtkey)
+            pvtkey_to_pubkey(pvtkey)
             user = self.db.init_user(userid, username, pvtkey=pvtkey, is_cover=True)
             if user:
                 text += "Success. Please keep it safe."
@@ -503,12 +481,51 @@ class DataExchanger:
             logger.error(err)
             text += "Please Use command as `/import_key 0x5ee77ca3c261cdd...adeffaf` . Please check your private key and try again."
 
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_to_message_id=message_id,
-            parse_mode="Markdown",
-        )
+        await update.message.reply_text(text, parse_mode="Markdown")
+
+    def get_all_trxs(self, senders, start_trx=None):
+        trxs = self.rum.api.get_content(senders=senders, start_trx=start_trx, num=20)
+        if len(trxs) == 0:
+            return None
+        for i in trxs:
+            yield i
+        return self.get_all_trxs(senders, trxs[-1]["TrxId"])
+
+    async def command_export_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logger.info("start command_export_data %s", update.message.message_id)
+        userid = update.message.from_user.id
+        user = self.db.get_first_user(userid)
+
+        if not user:
+            reply = "You have not registered yet. Please use command as `/new_key` to register."
+            await update.message.reply_text(reply)
+            return
+
+        if user.export_at and user.export_at > datetime.datetime.now() - datetime.timedelta(
+            hours=1
+        ):
+            reply = "You have exported your data in one hour. Please try again later."
+            await update.message.reply_text(reply)
+            return
+
+        trxs = [i for i in self.get_all_trxs([user.pubkey]) if i]
+        if len(trxs) > 0:
+            # create file-like object in memory
+            data = json.dumps(trxs, indent=4, ensure_ascii=False).encode("utf-8")
+            with io.BytesIO(data) as buffer:
+                buffer.seek(0)
+                # send file to user
+                await context.bot.send_document(
+                    chat_id=update.message.chat_id,
+                    document=buffer,
+                    filename=f"{datetime.date.today()}_export_data_{self.config.TG_BOT_NAME}.json",
+                    reply_to_message_id=update.message.message_id,
+                )
+            reply = f"You have exported your data, that is {len(trxs)} trxs in blockchain of rum-group.\nYour private key is:\n```{user.pvtkey}```\nPlease keep it safe."
+            self.db.update_user_export_at(userid)
+        else:
+            reply = "You have not any data in blockchain of rum-group."
+        await update.message.reply_text(reply, parse_mode="Markdown")
 
     async def command_my_nft(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("start command_my_nft")
@@ -518,12 +535,7 @@ class DataExchanger:
         logger.info("start command_grant_nft")
         userid = update.message.from_user.id
         if userid not in self.config.ADMIN_USERIDS:
-            reply = "You are not admin."
-            await context.bot.send_message(
-                chat_id=update.message.chat_id,
-                text=reply,
-                reply_to_message_id=update.message.message_id,
-            )
+            await update.message.reply_text("You are not admin.")
             return
         # TODO
 
@@ -534,6 +546,7 @@ class DataExchanger:
         # TODO: add logs to map userid and pvtkey
         self.app.add_handler(CommandHandler("new_pvtkey", self.command_new_pvtkey))
         self.app.add_handler(CommandHandler("import_pvtkey", self.command_import_pvtkey))
+        self.app.add_handler(CommandHandler("export_data", self.command_export_data))
         # TODO:
         self.app.add_handler(CommandHandler("my_nft", self.command_my_nft))
         self.app.add_handler(CommandHandler("grant_nft", self.command_grant_nft))
