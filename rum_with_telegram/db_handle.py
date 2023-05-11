@@ -46,22 +46,25 @@ class DBHandle:
         with self.Session() as session:
             return session.query(table).filter_by(**{pk: payload[pk]}).all()
 
-    def get_trx_sent(self, channel_message_id):
+    def get_trx_sent_by(self, channel_message_id, chat_type):
         with self.Session() as session:
-            relation = (
-                session.query(Relation)
-                .filter_by(channel_message_id=channel_message_id, chat_type="private")
-                .first()
-            )
-            if relation and relation.trx_id:
-                return relation
             relations = (
-                session.query(Relation).filter_by(channel_message_id=channel_message_id).all()
+                session.query(Relation)
+                .filter_by(channel_message_id=channel_message_id, chat_type=chat_type)
+                .all()
             )
             for relation in relations:
-                if relation.trx_id:
+                if relation and relation.trx_id:
                     return relation
-        return None
+            return None
+
+    def get_trx_sent(self, channel_message_id):
+        relation = self.get_trx_sent_by(channel_message_id, None)
+        if not relation:
+            relation = self.get_trx_sent_by(channel_message_id, "private")
+        if not relation:
+            relation = self.get_trx_sent_by(channel_message_id, "supergroup")
+        return relation
 
     def is_exist(self, table, payload: dict, pk: str):
         with self.Session() as session:

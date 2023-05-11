@@ -1,5 +1,4 @@
 python-telegram-bot==20.2
 quorum-data-py
 quorum-mininode-py 
-sqlalchemy 
-alembic
+sqlalchemy

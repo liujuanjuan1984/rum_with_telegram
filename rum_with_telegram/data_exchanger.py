@@ -277,68 +277,75 @@ class DataExchanger:
         if update.channel_post:
             await self._handle_channel_post(update, context)
             return
-        logger.info("handle_channel_message %s", update.message.message_id)
-        channel_message_id = update.message.forward_from_message_id
-        chat_message_id = update.message.message_id
+        message = update.message or update.edited_message
+        logger.info("handle_channel_message %s", message.message_id)
+        channel_message_id = message.forward_from_message_id
 
+        rum_post_url = None
         # send reply to user in group chat
-        for i in range(5):
+        for i in range(50):
             obj = self.db.get_trx_sent(channel_message_id)
             if not obj:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.1)
                 continue
             rum_post_url = obj.rum_post_url
             if not rum_post_url:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.1)
             else:
                 break
         if not rum_post_url:
             logger.warning("%s not found channel_message_id %s", i, channel_message_id)
-            return
-        logger.info("found rum_post_url %s", rum_post_url)
+        else:
+            logger.info("found rum_post_url %s", rum_post_url)
         await self._comment_with_feedurl(
-            context, "", update.message.chat.id, chat_message_id, rum_post_url
+            context, "", message.chat.id, message.message_id, rum_post_url
         )
         payload = {
-            "chat_message_id": chat_message_id,
-            "chat_type": update.message.chat.type,
+            "chat_message_id": message.message_id,
+            "chat_type": message.chat.type,
             "channel_message_id": channel_message_id,
         }
         self.db.add_or_update(Relation, payload, "chat_message_id")
 
     async def _handle_reply_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("start handle_reply_message %s", update.message.message_id)
-        username = update.message.from_user.username
-        userid = update.message.from_user.id
-        reply_msg = update.message.reply_to_message
+        message = update.message or update.edited_message
+        username = message.from_user.username
+        userid = message.from_user.id
+        reply_msg = message.reply_to_message
         channel_message_id = reply_msg.forward_from_message_id
         reply_chat_message_id = reply_msg.message_id
         reply_id = None
+
+        # comment to channel post
         if channel_message_id:
             obj = self.db.get_trx_sent(channel_message_id)
             reply_id = obj.rum_post_id if obj else None
+            logger.info("reply %s to channel_message_id %s", reply_id, channel_message_id)
+        # comment to reply
         elif reply_chat_message_id:
             obj = self.db.get_first(
                 Relation,
-                {"chat_message_id": reply_chat_message_id},
+                {"chat_message_id": reply_chat_message_id, "trx_type": "comment"},
                 "chat_message_id",
             )
-            reply_id = obj.rum_post_id if obj else None
-            if obj and not channel_message_id:
+            if obj:
+                reply_id = obj.rum_post_id
                 channel_message_id = obj.channel_message_id
-
-        if not channel_message_id and not reply_chat_message_id:
-            bot = Bot(token=context.bot.token)
-            _pinned = await bot.get_chat(self.config.TG_GROUP_ID)
-            _pinned = _pinned.pinned_message
-            channel_message_id = _pinned.forward_from_message_id
-            logger.info("get channel_message_id from pinned %s", channel_message_id)
-            reply_id = self.db.get_trx_sent(channel_message_id).rum_post_id
-            logger.info("channel_message_id to reply_id %s", reply_id)
+                logger.info(
+                    "reply %s to chat_message_id %s channel_message_id %s",
+                    reply_id,
+                    reply_chat_message_id,
+                    channel_message_id,
+                )
+                if reply_id is None and channel_message_id:
+                    obj = self.db.get_trx_sent(channel_message_id)
+                    reply_id = obj.rum_post_id
+                    logger.info("reply_id reset %s", reply_id)
 
         relation = await self.send_to_rum(
             context,
-            update.message,
+            message,
             userid,
             username,
             reply_id,
@@ -346,8 +353,8 @@ class DataExchanger:
         )
         relation.update(
             {
-                "chat_message_id": update.message.message_id,
-                "chat_type": update.message.chat.type,
+                "chat_message_id": message.message_id,
+                "chat_type": message.chat.type,
                 "channel_message_id": channel_message_id,
             }
         )
@@ -355,20 +362,21 @@ class DataExchanger:
 
     async def handle_group_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """handle group message"""
-        userid = update.message.from_user.id
+        message = update.message or update.edited_message
+        userid = message.from_user.id
         if userid in self.config.BLACK_LIST_TGIDS:
-            await update.message.reply_text("You are in the blacklist.")
+            await message.reply_text("You are in the blacklist.")
             return
 
-        if update.message.reply_to_message:
+        if message.reply_to_message:
             await self._handle_reply_message(update, context)
             return
         logger.info(
             "handle_group_message %s without reply_to_message",
-            update.message.message_id,
+            message.message_id,
         )
-        username = update.message.from_user.username
-        userid = update.message.from_user.id
+        username = message.from_user.username
+        userid = message.from_user.id
         bot = Bot(token=context.bot.token)
         _pinned = await bot.get_chat(self.config.TG_GROUP_ID)
         _pinned = _pinned.pinned_message
@@ -381,7 +389,7 @@ class DataExchanger:
 
         relation = await self.send_to_rum(
             context,
-            update.message,
+            message,
             userid,
             username,
             reply_id,
@@ -389,8 +397,8 @@ class DataExchanger:
         )
         relation.update(
             {
-                "chat_message_id": update.message.message_id,
-                "chat_type": update.message.chat.type,
+                "chat_message_id": message.message_id,
+                "chat_type": message.chat.type,
                 "channel_message_id": channel_message_id,
             }
         )
@@ -543,7 +551,6 @@ class DataExchanger:
         self.app.add_handler(CommandHandler("start", self.command_start))
         self.app.add_handler(CommandHandler("profile", self.command_profile))
         self.app.add_handler(CommandHandler("show_pvtkey", self.command_show_pvtkey))
-        # TODO: add logs to map userid and pvtkey
         self.app.add_handler(CommandHandler("new_pvtkey", self.command_new_pvtkey))
         self.app.add_handler(CommandHandler("import_pvtkey", self.command_import_pvtkey))
         self.app.add_handler(CommandHandler("export_data", self.command_export_data))
