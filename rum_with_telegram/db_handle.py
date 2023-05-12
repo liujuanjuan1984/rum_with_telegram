@@ -88,3 +88,15 @@ class DBHandle:
 
     def update_user_export_at(self, userid):
         return self.add_or_update(User, {"user_id": userid, "export_at": func.now()}, "user_id")
+
+    def add(self, table, payload):
+        with self.Session() as session:
+            obj = table(**payload)
+            session.add(obj)
+            try:
+                session.commit()
+                return True
+            except Exception as err:
+                session.rollback()
+                logger.info(err)
+                return False

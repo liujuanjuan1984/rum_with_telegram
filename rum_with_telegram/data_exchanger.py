@@ -186,7 +186,8 @@ class DataExchanger:
                             "channel_message_id": resp.message_id,
                         }
                     )
-                    self.db.add_or_update(Relation, relation, "trx_id")
+                    result = self.db.add(Relation, relation)
+                    logger.info("add relation %s channel %s", result, resp.message_id)
             elif _text:
                 resp = await self.app.bot.send_message(
                     chat_id=self.config.TG_CHANNEL_NAME,
@@ -197,7 +198,8 @@ class DataExchanger:
                         "channel_message_id": resp.message_id,
                     }
                 )
-                self.db.add_or_update(Relation, relation, "trx_id")
+                result = self.db.add(Relation, relation)
+                logger.info("add relation %s channel %s ", result, resp.message_id)
             await asyncio.sleep(1)
         return start_trx
 
@@ -242,7 +244,8 @@ class DataExchanger:
                 "channel_message_id": resp.message_id,
             }
         )
-        self.db.add_or_update(Relation, relation, "trx_id")
+        result = self.db.add(Relation, relation)
+        logger.info("add relation %s  channel %s chat %s", result, resp.message_id, message_id)
         await self._comment_with_feedurl(
             context,
             f" and to [{self.config.TG_CHANNEL_NAME}]({self.config.TG_CHANNEL_URL}/{resp.message_id})",
@@ -257,19 +260,21 @@ class DataExchanger:
         # channel post to rum group chain
         userid = update.channel_post.chat.id
         # send to rum
+        channel_message_id = update.channel_post.message_id
         relation = await self.send_to_rum(
             context,
             update.channel_post,
             userid,
             update.channel_post.chat.username,
-            origin=update.channel_post.message_id,
+            origin=channel_message_id,
         )
         relation.update(
             {
-                "channel_message_id": update.channel_post.message_id,
+                "channel_message_id": channel_message_id,
             }
         )
-        self.db.add_or_update(Relation, relation, "trx_id")
+        result = self.db.add(Relation, relation)
+        logger.info("add relation %s  channel %s ", result, channel_message_id)
 
     async def handle_channel_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """send message to rum group"""
@@ -300,12 +305,15 @@ class DataExchanger:
         await self._comment_with_feedurl(
             context, "", message.chat.id, message.message_id, rum_post_url
         )
-        payload = {
+        relation = {
             "chat_message_id": message.message_id,
             "chat_type": message.chat.type,
             "channel_message_id": channel_message_id,
         }
-        self.db.add_or_update(Relation, payload, "chat_message_id")
+        result = self.db.add(Relation, relation)
+        logger.info(
+            "add relation %s  channel %s chat %s", result, channel_message_id, message.message_id
+        )
 
     async def _handle_reply_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("start handle_reply_message %s", update.message.message_id)
@@ -358,7 +366,10 @@ class DataExchanger:
                 "channel_message_id": channel_message_id,
             }
         )
-        self.db.add_or_update(Relation, relation, "trx_id")
+        result = self.db.add(Relation, relation)
+        logger.info(
+            "add relation %s  channel %s chat %s", result, channel_message_id, message.message_id
+        )
 
     async def handle_group_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """handle group message"""
@@ -402,7 +413,10 @@ class DataExchanger:
                 "channel_message_id": channel_message_id,
             }
         )
-        self.db.add_or_update(Relation, relation, "trx_id")
+        result = self.db.add(Relation, relation)
+        logger.info(
+            "add relation %s channel %s chat %s", result, channel_message_id, message.message_id
+        )
 
     async def command_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/start command handler"""
