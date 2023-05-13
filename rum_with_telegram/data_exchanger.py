@@ -140,6 +140,9 @@ class DataExchanger:
         trxs = self.rum.api.get_content(num=20, start_trx=start_trx)
         for trx in trxs:
             start_trx = trx["TrxId"]
+            if self.config.POST_AUTH_TYPE == "whitelist":
+                if trx["SenderPubkey"] not in self.config.WHITELIST:
+                    continue
             if trx["SenderPubkey"] in self.config.BLACK_LIST_PUBKEYS:
                 continue
             if get_trx_type(trx) != "post":
@@ -211,6 +214,12 @@ class DataExchanger:
         if userid in self.config.BLACK_LIST_TGIDS:
             await update.message.reply_text("You are in the blacklist.")
             return
+        if self.config.POST_AUTH_TYPE == "whitelist":
+            if userid not in self.config.WHITELIST:
+                await update.message.reply_text(
+                    f"You are not in the whitelist. Your content will not be post to channel.\n You can leave a comment to any post of the channel.@{self.config.TG_CHANNEL_NAME}"
+                )
+                return
         _first_name = update.message.from_user.first_name
         _last_name = update.message.from_user.last_name
         _fullname = f"{_first_name} {_last_name}" if _last_name else _first_name

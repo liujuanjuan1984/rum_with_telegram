@@ -16,6 +16,8 @@ class Config:
     TG_BOT_NAME: str
     TG_CHANNEL_NAME: str
     TG_GROUP_NAME: str
+    POST_AUTH_TYPE: str = "blacklist"  # whitelist or blacklist
+    WHITELIST: list = None
     # list of telegram userid who is admin for this service
     ADMIN_USERIDS: list = None
     # blacklist of public keys of rum group, whos trxs cannot be packed to block
@@ -43,6 +45,7 @@ class Config:
         self.ADMIN_USERIDS = self.ADMIN_USERIDS or []
         self.BLACK_LIST_PUBKEYS = self.BLACK_LIST_PUBKEYS or []
         self.BLACK_LIST_TGIDS = self.BLACK_LIST_TGIDS or []
+        self.WHITELIST = self.WHITELIST or []
 
 
 def read_json(json_file: str):
