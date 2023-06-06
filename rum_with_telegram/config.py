@@ -37,6 +37,7 @@ class Config:
     TG_CHANNEL_URL: str = None  # the url of telegram url
     TG_CHANNEL_ID: int = None
     TG_GROUP_ID: int = None
+    TG_COMMANDS: list = None
 
     def __post_init__(self):
         if self.TG_CHANNEL_URL is None:

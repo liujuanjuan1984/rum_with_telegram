@@ -6,6 +6,7 @@ import json
 import logging
 
 from quorum_data_py import feed, get_trx_type, util
+from quorum_eth_py import RumEthChainBrowser
 from quorum_mininode_py import MiniNode, pvtkey_to_pubkey
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -133,7 +134,7 @@ class DataExchanger:
                 _trx_id = self.start_trx
             start_trx = await self._handle_rum(self.start_trx)
             if start_trx == self.start_trx:
-                await asyncio.sleep(5)
+                await asyncio.sleep(1)
             self.start_trx = start_trx
 
     async def _handle_rum(self, start_trx):
@@ -558,17 +559,44 @@ class DataExchanger:
             reply = "You have not any data in blockchain of rum-group."
         await update.message.reply_text(reply, parse_mode="Markdown")
 
-    async def command_my_nft(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logger.info("start command_my_nft")
-        # TODO
-
-    async def command_grant_nft(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logger.info("start command_grant_nft")
+    async def command_tokens(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logger.info("start command_tokens")
         userid = update.message.from_user.id
-        if userid not in self.config.ADMIN_USERIDS:
-            await update.message.reply_text("You are not admin.")
+        username = update.message.from_user.username
+        user = self.db.init_user(userid, username)
+        used = self.db.get_all(UsedKey, {"user_id": userid}, "user_id") or []
+
+        if not user:
+            logger.warning("command_tokens error %s", userid)
             return
-        # TODO
+
+        address = user.address
+        tokens = RumEthChainBrowser().get_token_list(address)
+        reply = f"Your address: {address}\n"
+        null = True
+        for i in tokens:
+            if i["balance2"] > 0:
+                reply += f'{i["symbol"]} {i["balance2"]}\n'
+                null = False
+        if null:
+            reply += "You have not any token."
+        else:
+            reply += (
+                f"more details view page: https://explorer.rumsystem.net/address/{address}/tokens"
+            )
+        await update.message.reply_text(reply)
+
+    async def set_commands(self):
+        my_commands = self.config.TG_COMMANDS or []
+        commands = await self.app.bot.get_my_commands()
+        flag = False
+        for cmd in commands:
+            if [cmd.command, cmd.description] not in my_commands:
+                flag = True
+                break
+        if flag:
+            await self.app.bot.set_my_commands(my_commands)
+            logger.info("set_commands %s", my_commands)
 
     def run(self):
         self.app.add_handler(CommandHandler("start", self.command_start))
@@ -577,9 +605,7 @@ class DataExchanger:
         self.app.add_handler(CommandHandler("new_pvtkey", self.command_new_pvtkey))
         self.app.add_handler(CommandHandler("import_pvtkey", self.command_import_pvtkey))
         self.app.add_handler(CommandHandler("export_data", self.command_export_data))
-        # TODO:
-        self.app.add_handler(CommandHandler("my_nft", self.command_my_nft))
-        self.app.add_handler(CommandHandler("grant_nft", self.command_grant_nft))
+        self.app.add_handler(CommandHandler("tokens", self.command_tokens))
 
         content_filter = (filters.TEXT | filters.PHOTO) & ~filters.COMMAND
         # private chat message:
